@@ -1,0 +1,26 @@
+# Maintainer: melvinfranco99
+pkgname=airscope
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Analizador WiFi profesional (estilo inSSIDer): dBm, canales, DFS, Wi-Fi 4/5/6, espectro y radar"
+arch=('any')
+url="https://github.com/melvinfranco99/airscope"
+license=('MIT')
+depends=('python' 'python-pyqt6' 'networkmanager' 'iw')
+optdepends=('hwdata: nombres de fabricantes (OUI)')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    install -d "$pkgdir/usr/lib/$pkgname"
+    cp -r airscope "$pkgdir/usr/lib/$pkgname/"
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/airscope" <<LAUNCH
+#!/bin/sh
+export PYTHONPATH=/usr/lib/$pkgname
+exec python3 -m airscope "\$@"
+LAUNCH
+    install -Dm644 airscope/airscope.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/airscope.svg"
+    install -Dm644 packaging/airscope.desktop "$pkgdir/usr/share/applications/airscope.desktop"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

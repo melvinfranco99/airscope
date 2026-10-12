@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AirScope
+GenericName=Analizador WiFi
+Comment=Analizador WiFi profesional: dBm, canales, DFS, Wi-Fi 4/5/6, espectro y radar
+Exec=airscope
+Icon=airscope
+Terminal=false
+Categories=Network;Monitor;Utility;Qt;
+Keywords=wifi;wlan;inssider;analyzer;spectrum;channel;dbm;
+StartupWMClass=airscope
