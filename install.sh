@@ -76,7 +76,7 @@ Comment=Analizador WiFi profesional: dBm, canales, DFS, Wi-Fi 4/5/6, espectro y 
 Exec=$BIN/$APP
 Icon=$APP
 Terminal=false
-Categories=Network;Monitor;Utility;Qt;
+Categories=Network;Monitor;Qt;
 Keywords=wifi;wlan;inssider;analyzer;spectrum;channel;dbm;
 StartupWMClass=airscope
 DESK
