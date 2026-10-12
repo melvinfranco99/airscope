@@ -1,4 +1,6 @@
-# ◉ AirScope — Analizador WiFi profesional para Linux
+# ◉ AirScope — Analizador WiFi profesional para Linux y Android
+
+📱 **App Android:** descarga el APK en **https://melvinfranco99.github.io/airscope/**
 
 Analizador de redes WiFi de escritorio al estilo **inSSIDer**: potencia en dBm, distancia estimada,
 canales, anchos de canal, Wi-Fi 4/5/6/6E/7, bandas de 2.4 / 5 / 6 GHz, DFS, seguridad, Wi-Fi Direct (P2P GO)
@@ -45,7 +47,19 @@ y mucho más, con gráficas profesionales y un código de colores que lo simplif
 | ≥ −75 | Débil | 🟠 naranja |
 | < −75 | Muy débil (lejos) | 🔴 rojo |
 
-## Instalación
+## App Android
+
+<p>
+<img src="docs/app/t0.png" width="200"> <img src="docs/app/t1.png" width="200"> <img src="docs/app/t3.png" width="200"> <img src="docs/app/detail.png" width="200">
+</p>
+
+Las mismas vistas que la versión de escritorio (redes, espectro, historial, congestión, radar, estadísticas,
+diagnóstico y detalle) en una app nativa de **129 KB**, sin permiso de Internet, para Android 7.0+.
+
+* Descarga: [web de AirScope](https://melvinfranco99.github.io/airscope/) o [Releases](https://github.com/melvinfranco99/airscope/releases)
+* Código: [`android/`](android) (Java, sin dependencias). Compilar: `cd android && ./gradlew assembleRelease`
+
+## Instalación (Linux)
 
 Requisitos: Linux con **NetworkManager**, `iw`, Python 3.9+ y **PyQt6** (el instalador los instala si faltan
 en Arch, Debian/Ubuntu, Fedora y openSUSE). **No necesita root** para escanear.

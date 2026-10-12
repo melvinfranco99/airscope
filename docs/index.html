@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirScope — Analizador WiFi para Android y Linux</title>
+<meta name="description" content="AirScope: analizador WiFi profesional gratuito. dBm, distancia, canales, DFS, Wi-Fi 4/5/6/6E/7, 2.4/5/6 GHz, espectro, radar y diagnóstico. Descarga el APK para Android.">
+<meta property="og:title" content="AirScope — Analizador WiFi">
+<meta property="og:description" content="Analiza tu WiFi como un profesional: dBm, canales, DFS, Wi-Fi 6, espectro y radar.">
+<meta property="og:image" content="app/t0.png">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0b1120;--panel:#111a2e;--panel2:#16213a;--grid:#1f2b45;--grid2:#2b3a5c;
+  --text:#e2e8f0;--dim:#8a9bb8;--accent:#22d3ee;--accent2:#6366f1;
+  --good:#22c55e;--ok:#84cc16;--fair:#eab308;--weak:#f97316;--bad:#ef4444;--dfs:#f59e0b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;line-height:1.6;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1160px;margin:0 auto;padding:0 20px}
+code,.mono{font-family:"JetBrains Mono",monospace}
+
+/* nav */
+nav{position:sticky;top:0;z-index:20;background:rgba(11,17,32,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--grid)}
+nav .wrap{display:flex;align-items:center;gap:24px;height:62px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;letter-spacing:-.02em}
+.logo img{width:30px;height:30px}
+.logo b{color:var(--accent)}
+nav .links{display:flex;gap:22px;margin-left:auto;font-size:14px;color:var(--dim)}
+nav .links a:hover{color:var(--text)}
+nav .cta{padding:8px 16px;border-radius:9px;background:var(--accent);color:#04202a;font-weight:700;font-size:14px}
+@media(max-width:760px){nav .links{display:none}nav .cta{margin-left:auto}}
+
+/* hero */
+.hero{position:relative;padding:72px 0 40px;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:-200px -100px auto auto;width:700px;height:700px;border-radius:50%;
+  background:radial-gradient(circle,rgba(34,211,238,.16),transparent 60%);pointer-events:none}
+.hero::after{content:"";position:absolute;left:-200px;top:200px;width:600px;height:600px;border-radius:50%;
+  background:radial-gradient(circle,rgba(99,102,241,.14),transparent 60%);pointer-events:none}
+.hero .wrap{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;position:relative;z-index:1}
+@media(max-width:900px){.hero .wrap{grid-template-columns:1fr}.phone-stage{order:-1}}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--grid2);border-radius:999px;
+  font-size:13px;color:var(--dim);background:var(--panel)}
+.badge i{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 10px var(--good)}
+h1{font-size:clamp(38px,6vw,64px);line-height:1.04;letter-spacing:-.035em;font-weight:800;margin:20px 0 18px}
+h1 .grad{background:linear-gradient(90deg,var(--good),var(--accent) 50%,var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:18px;color:var(--dim);max-width:560px}
+.dl{display:flex;flex-wrap:wrap;gap:12px;margin:30px 0 14px}
+.btn{display:inline-flex;align-items:center;gap:12px;padding:14px 22px;border-radius:12px;font-weight:700;font-size:16px;transition:transform .15s,box-shadow .15s}
+.btn:hover{transform:translateY(-2px)}
+.btn.primary{background:linear-gradient(135deg,#22d3ee,#38bdf8);color:#04202a;box-shadow:0 10px 30px -10px rgba(34,211,238,.7)}
+.btn.ghost{border:1px solid var(--grid2);background:var(--panel)}
+.btn svg{width:22px;height:22px;flex:none}
+.btn small{display:block;font-weight:500;font-size:12px;opacity:.75;line-height:1.1}
+.meta{font-size:13px;color:var(--dim);display:flex;flex-wrap:wrap;gap:6px 18px}
+.meta span{display:inline-flex;align-items:center;gap:6px}
+
+/* phone */
+.phone-stage{display:flex;justify-content:center;position:relative}
+.phone{width:min(300px,78vw);aspect-ratio:1080/2400;border-radius:42px;padding:10px;background:linear-gradient(145deg,#2b3a5c,#0f172a);
+  box-shadow:0 40px 80px -30px rgba(0,0,0,.8),0 0 0 1px #334155 inset,0 0 60px -10px rgba(34,211,238,.25);position:relative}
+.phone .screen{width:100%;height:100%;border-radius:34px;overflow:hidden;background:#000;position:relative}
+.phone .screen img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .8s}
+.phone .screen img.on{opacity:1}
+.phone::after{content:"";position:absolute;top:18px;left:50%;transform:translateX(-50%);width:14px;height:14px;border-radius:50%;background:#020617;box-shadow:0 0 0 2px #1e293b}
+.floating{position:absolute;background:var(--panel);border:1px solid var(--grid2);border-radius:12px;padding:10px 14px;font-size:13px;box-shadow:0 20px 40px -20px #000}
+.floating b{display:block;font-size:20px}
+.f1{left:-10px;top:18%}.f2{right:-14px;top:50%}.f3{left:4%;bottom:10%}
+@media(max-width:520px){.floating{display:none}}
+
+/* sections */
+section{padding:70px 0}
+.eyebrow{color:var(--accent);font-weight:700;font-size:13px;letter-spacing:.12em;text-transform:uppercase}
+h2{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;line-height:1.15;margin:10px 0 14px}
+.sub{color:var(--dim);max-width:640px}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:36px}
+.card{background:var(--panel);border:1px solid var(--grid);border-radius:14px;padding:22px;transition:border-color .2s}
+.card:hover{border-color:var(--grid2)}
+.card .ic{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;margin-bottom:14px;font-size:20px}
+.card h3{font-size:16px;margin-bottom:6px}
+.card p{font-size:14px;color:var(--dim)}
+
+/* scale */
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:30px}
+.scale div{border-radius:12px;padding:16px 12px;background:var(--panel);border:1px solid var(--grid);border-top:4px solid}
+.scale b{display:block;font-size:20px}
+.scale span{font-size:13px;color:var(--dim)}
+@media(max-width:700px){.scale{grid-template-columns:1fr 1fr}}
+
+/* gallery */
+.gallery{display:flex;gap:18px;overflow-x:auto;padding:30px 4px 20px;scroll-snap-type:x mandatory;scrollbar-width:thin;scrollbar-color:var(--grid2) transparent}
+.gallery figure{flex:none;width:230px;scroll-snap-align:start}
+.gallery img{width:100%;border-radius:22px;border:6px solid #1e293b;box-shadow:0 20px 40px -20px #000;display:block}
+.gallery figcaption{text-align:center;font-size:13px;color:var(--dim);margin-top:10px}
+
+/* steps */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:30px;counter-reset:s}
+.step{background:var(--panel);border:1px solid var(--grid);border-radius:14px;padding:22px;position:relative}
+.step::before{counter-increment:s;content:counter(s);position:absolute;top:18px;right:18px;width:30px;height:30px;border-radius:50%;
+  display:grid;place-items:center;background:var(--panel2);color:var(--accent);font-weight:800;border:1px solid var(--grid2)}
+.step h3{font-size:16px;margin-bottom:6px;padding-right:36px}
+.step p{font-size:14px;color:var(--dim)}
+
+.verify{margin-top:20px;background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:16px 18px;font-size:13px;color:var(--dim);overflow-wrap:anywhere}
+.verify code{color:var(--text)}
+
+/* desktop */
+.desk{display:grid;grid-template-columns:1fr 1.3fr;gap:36px;align-items:center}
+@media(max-width:900px){.desk{grid-template-columns:1fr}}
+.desk img{width:100%;border-radius:14px;border:1px solid var(--grid2);box-shadow:0 30px 60px -30px #000}
+pre{background:#060b17;border:1px solid var(--grid);border-radius:12px;padding:16px;font-size:13px;overflow-x:auto;margin-top:18px;color:#cbd5e1}
+pre .c{color:#64748b}
+
+/* faq */
+details{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:16px 20px;margin-top:10px}
+summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:10px}
+summary::after{content:"+";color:var(--accent);font-size:20px;line-height:1}
+details[open] summary::after{content:"–"}
+details p{color:var(--dim);font-size:14px;margin-top:10px}
+
+footer{border-top:1px solid var(--grid);padding:30px 0;color:var(--dim);font-size:13px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between}
+footer a{color:var(--accent)}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#"><img src="icon.svg" alt=""><span><b>Air</b>Scope</span></a>
+    <div class="links">
+      <a href="#funciones">Funciones</a>
+      <a href="#capturas">Capturas</a>
+      <a href="#instalar">Instalar</a>
+      <a href="#escritorio">Linux</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <a class="cta" href="AirScope.apk" download>Descargar APK</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <span class="badge"><i></i> v1.0.0 · gratis y de código abierto</span>
+      <h1>Analiza tu WiFi<br><span class="grad">como un profesional</span></h1>
+      <p class="lead">Potencia en dBm, distancia estimada, canales, DFS, Wi-Fi 4/5/6/6E/7 y bandas de 2.4, 5 y 6 GHz.
+        Espectro de canales, radar de proximidad y diagnóstico automático. <b style="color:var(--good)">Verde</b> = cerca,
+        <b style="color:var(--bad)">rojo</b> = lejos.</p>
+      <div class="dl">
+        <a class="btn primary" href="AirScope.apk" download>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 9.48l1.84-3.18a.38.38 0 00-.66-.38l-1.86 3.22a11.4 11.4 0 00-9.84 0L5.22 5.92a.38.38 0 10-.66.38L6.4 9.48A10.8 10.8 0 001 18h22a10.8 10.8 0 00-5.4-8.52zM7 15.25a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5zm10 0a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5z"/></svg>
+          <span>Descargar para Android<small>APK · <span id="size">129 KB</span> · Android 7.0+</small></span>
+        </a>
+        <a class="btn ghost" href="https://github.com/melvinfranco99/airscope">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 00-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 016 0C17.3 4.7 18.3 5 18.3 5c.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0012 .5z"/></svg>
+          <span>Código en GitHub<small>Licencia MIT</small></span>
+        </a>
+      </div>
+      <div class="meta">
+        <span>✓ Sin anuncios</span><span>✓ Sin rastreadores</span><span>✓ Sin conexión a Internet</span><span>✓ También para Linux</span>
+      </div>
+    </div>
+    <div class="phone-stage">
+      <div class="phone"><div class="screen" id="screen">
+        <img class="on" src="app/t0.png" alt="Lista de redes WiFi en AirScope">
+        <img src="app/t1.png" alt="Espectro de canales 2.4 GHz">
+        <img src="app/t4.png" alt="Radar de proximidad">
+        <img src="app/t3.png" alt="Congestión de canales">
+        <img src="app/detail.png" alt="Detalle de un punto de acceso">
+      </div></div>
+      <div class="floating f1"><span style="color:var(--dim)">Señal</span><b style="color:var(--good)">-38 dBm</b></div>
+      <div class="floating f2"><span style="color:var(--dim)">Mejor canal</span><b style="color:var(--accent)">★ 11</b></div>
+      <div class="floating f3"><span style="color:var(--dim)">Estándar</span><b style="color:#38bdf8">Wi-Fi 6</b></div>
+    </div>
+  </div>
+</header>
+
+<section id="funciones">
+  <div class="wrap">
+    <div class="eyebrow">Funciones</div>
+    <h2>Todo lo técnico, explicado con colores</h2>
+    <p class="sub">AirScope lee los Information Elements que emite cada router y los convierte en gráficas que se entienden de un vistazo.</p>
+    <div class="grid">
+      <div class="card"><div class="ic" style="background:rgba(34,197,94,.12)">📶</div><h3>Potencia en dBm</h3><p>RSSI real, calidad %, SNR, potencia en mW y medidor tipo velocímetro con escala de color.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(132,204,22,.12)">📏</div><h3>Distancia estimada</h3><p>Modelo de pérdidas log-distancia configurable (vivienda, oficina…) y potencia TX anunciada por el AP.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(34,211,238,.12)">📡</div><h3>Canales y ancho</h3><p>Canal primario y secundario, 20/40/80/160/320 MHz, frecuencia central y rango ocupado.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(245,158,11,.12)">🛰️</div><h3>DFS y U-NII</h3><p>Canales compartidos con radar (52-144), radar meteorológico con CAC de 10 min y bloques U-NII-1 a U-NII-4.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(56,189,248,.12)">⚡</div><h3>Wi-Fi 4 / 5 / 6 / 6E / 7</h3><p>Detección del estándar 802.11n/ac/ax/be, streams MIMO y tasa PHY máxima teórica.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(239,68,68,.12)">🔒</div><h3>Seguridad</h3><p>WPA1/2/3, SAE, FT, 802.1X, cifrados CCMP/TKIP/GCMP, PMF 802.11w y avisos de WPS.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(99,102,241,.14)">🖨️</div><h3>Wi-Fi Direct (P2P GO)</h3><p>Identifica impresoras, TVs y móviles que actúan como Group Owner.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(167,139,250,.14)">🩺</div><h3>Diagnóstico automático</h3><p>Interferencias sobre tu red, canal recomendado ★, redes abiertas, canales solapados y BSS Load.</p></div>
+    </div>
+
+    <div class="scale">
+      <div style="border-top-color:var(--good)"><b style="color:var(--good)">≥ −50</b><span>Excelente · muy cerca</span></div>
+      <div style="border-top-color:var(--ok)"><b style="color:var(--ok)">≥ −60</b><span>Muy buena</span></div>
+      <div style="border-top-color:var(--fair)"><b style="color:var(--fair)">≥ −67</b><span>Buena</span></div>
+      <div style="border-top-color:var(--weak)"><b style="color:var(--weak)">≥ −75</b><span>Débil</span></div>
+      <div style="border-top-color:var(--bad)"><b style="color:var(--bad)">&lt; −75</b><span>Muy débil · lejos</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="capturas" style="background:linear-gradient(180deg,transparent,rgba(17,26,46,.6),transparent)">
+  <div class="wrap">
+    <div class="eyebrow">Capturas</div>
+    <h2>Siete vistas para entender tu WiFi</h2>
+    <p class="sub">Capturas reales de la app (en modo demostración, para no mostrar redes de vecinos).</p>
+    <div class="gallery">
+      <figure><img loading="lazy" src="app/t0.png" alt=""><figcaption>Redes</figcaption></figure>
+      <figure><img loading="lazy" src="app/t1.png" alt=""><figcaption>Espectro de canales</figcaption></figure>
+      <figure><img loading="lazy" src="app/t2.png" alt=""><figcaption>Historial de señal</figcaption></figure>
+      <figure><img loading="lazy" src="app/t3.png" alt=""><figcaption>Congestión y canal recomendado</figcaption></figure>
+      <figure><img loading="lazy" src="app/t4.png" alt=""><figcaption>Radar de proximidad</figcaption></figure>
+      <figure><img loading="lazy" src="app/t5.png" alt=""><figcaption>Estadísticas</figcaption></figure>
+      <figure><img loading="lazy" src="app/t6.png" alt=""><figcaption>Diagnóstico</figcaption></figure>
+      <figure><img loading="lazy" src="app/detail.png" alt=""><figcaption>Detalle del punto de acceso</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section id="instalar">
+  <div class="wrap">
+    <div class="eyebrow">Instalación en Android</div>
+    <h2>Listo en menos de un minuto</h2>
+    <div class="steps">
+      <div class="step"><h3>Descarga el APK</h3><p>Pulsa <a href="AirScope.apk" download style="color:var(--accent)">Descargar APK</a> desde el navegador del móvil.</p></div>
+      <div class="step"><h3>Permite la instalación</h3><p>Android te pedirá permitir «instalar apps desconocidas» para tu navegador. Acéptalo solo para esta instalación.</p></div>
+      <div class="step"><h3>Abre AirScope</h3><p>Concede el permiso de ubicación: Android lo exige a cualquier app que escanee redes WiFi.</p></div>
+      <div class="step"><h3>Activa la ubicación</h3><p>Con la ubicación del sistema y el WiFi encendidos, las redes aparecerán al instante.</p></div>
+    </div>
+    <div class="verify">
+      Verifica la descarga · SHA-256: <code id="sha">de1da6a18c9530c21611025201c0adf518249ff76b2f1a198ec56fdc8cbe433a</code><br>
+      Certificado de firma · SHA-256: <code>bea93302405e686034c130850c904fd979381603748fd528cac728076b02b04e</code>
+    </div>
+  </div>
+</section>
+
+<section id="escritorio">
+  <div class="wrap desk">
+    <div>
+      <div class="eyebrow">Versión de escritorio</div>
+      <h2>AirScope para Linux</h2>
+      <p class="sub">La misma plataforma con pantalla grande: tabla completa, espectros de 2.4/5/6 GHz, historial, radar y exportación a CSV. Sin necesidad de root.</p>
+<pre><span class="c"># Instalar (Arch, Debian/Ubuntu, Fedora, openSUSE)</span>
+git clone https://github.com/melvinfranco99/airscope.git
+cd airscope && ./install.sh
+
+<span class="c"># Ejecutar</span>
+airscope</pre>
+    </div>
+    <img loading="lazy" src="spectrum24.png" alt="AirScope de escritorio en Linux">
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap" style="max-width:820px">
+    <div class="eyebrow">Preguntas frecuentes</div>
+    <h2>FAQ</h2>
+    <details><summary>¿Por qué pide permiso de ubicación?</summary><p>Android considera que la lista de redes WiFi cercanas puede revelar tu ubicación, por eso obliga a cualquier app que escanee WiFi a pedir ese permiso. AirScope no tiene permiso de Internet: nada sale de tu teléfono.</p></details>
+    <details><summary>¿Por qué se actualiza solo cada cierto tiempo?</summary><p>Desde Android 9 el sistema limita los escaneos a 4 cada 2 minutos por app. Puedes desactivar «Limitación de búsqueda de Wi-Fi» en las Opciones de desarrollador para escanear cada pocos segundos.</p></details>
+    <details><summary>¿Es exacta la distancia?</summary><p>Es una estimación con un modelo físico de pérdidas. Paredes, muebles y orientación de antenas alteran el resultado; úsala como referencia de cerca/lejos. Puedes ajustar el entorno en ⚙ Ajustes.</p></details>
+    <details><summary>¿Qué significa el asterisco en el estándar (Wi-Fi 6*)?</summary><p>Que se ha estimado por el ancho de canal porque el sistema no proporcionó los Information Elements (ocurre en Android 10 o anterior).</p></details>
+    <details><summary>Android dice que la app es de un desarrollador desconocido</summary><p>Es normal en apps que no se descargan desde Google Play. El APK está firmado y el código fuente completo está en GitHub para que puedas revisarlo o compilarlo tú mismo.</p></details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Melvin Franco · AirScope · Licencia MIT</span>
+    <span><a href="https://github.com/melvinfranco99/airscope">GitHub</a> · <a href="https://github.com/melvinfranco99/airscope/releases">Versiones</a></span>
+  </div>
+</footer>
+
+<script>
+  // Carrusel del teléfono
+  (function(){
+    var imgs=document.querySelectorAll('#screen img'),i=0;
+    setInterval(function(){imgs[i].classList.remove('on');i=(i+1)%imgs.length;imgs[i].classList.add('on');},3200);
+  })();
+</script>
+</body>
+</html>
