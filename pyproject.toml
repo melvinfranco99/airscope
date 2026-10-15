@@ -18,4 +18,4 @@ airscope = "airscope.app:main"
 packages = ["airscope"]
 
 [tool.setuptools.package-data]
-airscope = ["*.svg"]
+airscope = ["*.svg", "controller/*"]

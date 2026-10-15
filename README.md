@@ -59,6 +59,25 @@ diagnóstico y detalle) en una app nativa de **129 KB**, sin permiso de Internet
 * Descarga: [web de AirScope](https://melvinfranco99.github.io/airscope/) o [Releases](https://github.com/melvinfranco99/airscope/releases)
 * Código: [`android/`](android) (Java, sin dependencias). Compilar: `cd android && ./gradlew assembleRelease`
 
+## Simulador de controlador WLAN (web)
+
+<p><img src="docs/controller.png" width="820"></p>
+
+Una consola, al estilo de la de un controlador de puntos de acceso, para planificar una red WiFi sobre tu propio plano. Formas de abrirla:
+
+* **Web**: [melvinfranco99.github.io/airscope/controller](https://melvinfranco99.github.io/airscope/controller/) (también desde el enlace «Controlador» de la web).
+* **Dentro de AirScope (Linux)**: botón **▦ Controlador WLAN** de la barra superior, o `airscope --controller` para abrir solo el simulador. En el menú de aplicaciones, clic derecho en AirScope → *Controlador WLAN (simulador)*. Necesita `python-pyqt6-webengine` (si falta, se abre en el navegador).
+* **Sin instalar nada**: abre `docs/controller/index.html` del repositorio en cualquier navegador.
+
+* **Plano**: carga una imagen, indica ancho y fondo en metros o calibra la escala marcando una distancia conocida. Dibuja muros y salas con 10 materiales (pladur, ladrillo, hormigón, cristal, metal…), cada uno con su atenuación por banda.
+* **Puntos de acceso**: 6 modelos genéricos (Wi-Fi 6/6E/7, de pared, sectorial). En cada radio de 2,4/5/6 GHz se elige canal, ancho (20–320 MHz) y potencia en dBm/mW, con el límite de PIRE de la normativa (ES, UE, EE. UU., México).
+* **Mapas de calor**: RSSI, 2.º AP (roaming), SNR, SINR, interferencia co-canal, velocidad PHY, throughput, nº de APs, zonas de servicio, canal y cumplimiento de perfiles (voz, datos, RTLS…). Para todos los APs o uno solo, por banda, con isolíneas y una sonda RF al pasar el ratón.
+* **RRM**: DCA (asignación de canales) y TPC (control de potencia) automáticos o manuales, DFS con simulación de radar y lista NOL, band steering y umbrales de roaming.
+* **Red**: WLAN con WPA2/WPA3/OWE/Enterprise, VLAN, 802.11r/k/v y sobrecarga de beacons; clientes simulados con asociación, roaming, enlace de subida/bajada y MCS; recorridos de prueba; registro de eventos.
+* El proyecto se guarda en el navegador y se puede exportar/importar en JSON o como PNG. Código: [`docs/controller/`](docs/controller) (JavaScript sin dependencias).
+
+El modelo de propagación (log-distancia en 3D + muros + diagrama de antena) es una predicción: los valores reales pueden variar ±5–8 dB.
+
 ## Instalación (Linux)
 
 Requisitos: Linux con **NetworkManager**, `iw`, Python 3.9+ y **PyQt6** (el instalador los instala si faltan

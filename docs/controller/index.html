@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirScope Controller</title>
+<meta name="description" content="Simulador de controlador WLAN: coloca puntos de acceso sobre tu plano, ajusta potencia, canales y anchos, y obtén mapas de calor de cobertura, SNR, interferencia y velocidad.">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="controller.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <button class="menu-btn" id="menuBtn" aria-label="Menú"><i data-ic="menu"></i></button>
+    <a class="brand" href="../"><img src="../icon.svg" alt=""><span><b>Air</b>Scope Controller</span><small>SIMULADOR</small></a>
+    <div class="proj"><span class="hide-m">Proyecto</span><b id="projName">—</b></div>
+    <div class="right">
+      <span class="pill hide-m" id="countryPill">ES</span>
+      <span class="pill"><i></i><span id="apOnline">0/0</span>&nbsp;APs</span>
+      <span class="mono hide-m" id="clock"></span>
+      <span class="hide-m">admin</span>
+    </div>
+  </header>
+
+  <nav class="side" id="side">
+    <div class="sec">Monitorizar</div>
+    <a data-view="dash"><i data-ic="gauge"></i>Panel</a>
+    <a data-view="map"><i data-ic="map"></i>Plano y mapa de calor</a>
+    <a data-view="clients"><i data-ic="users"></i>Clientes<span class="n" id="nClients">0</span></a>
+    <a data-view="events"><i data-ic="list"></i>Eventos<span class="n" id="nEvents">0</span></a>
+    <div class="sec">Configurar</div>
+    <a data-view="aps"><i data-ic="ap"></i>Puntos de acceso<span class="n" id="nAps">0</span></a>
+    <a data-view="rf"><i data-ic="wave"></i>Radio y RRM</a>
+    <a data-view="wlans"><i data-ic="wifi"></i>Redes (WLAN)<span class="n" id="nWlans">0</span></a>
+    <a data-view="project"><i data-ic="settings"></i>Proyecto y plano</a>
+    <div class="foot">Simulación RF orientativa: log-distancia + atenuación por muros. Verifica siempre con una medición in situ.</div>
+  </nav>
+
+  <main id="main">
+    <!-- ============================== PANEL -->
+    <section class="view" id="v-dash">
+      <div class="vh"><div><h1>Panel</h1><p>Estado de la red simulada y salud de RF</p></div>
+        <div class="actions"><button class="btn" data-go="map"><i data-ic="map"></i>Abrir plano</button></div></div>
+      <div class="cards" id="kpis"></div>
+      <div class="cols">
+        <div class="panel"><h2>Alertas de RF</h2><div id="alerts"></div></div>
+        <div class="panel"><h2>Clientes por banda</h2><div id="bandChart"></div>
+          <h3>Utilización de canal (máx. por AP)</h3><div id="utilList"></div></div>
+      </div>
+      <div class="panel"><h2>Ocupación del espectro</h2><div id="dashSpec"></div></div>
+    </section>
+
+    <!-- ============================== MAPA -->
+    <section class="view map-view" id="v-map">
+      <div class="toolbar" id="toolbar"></div>
+      <div class="stage" id="stage">
+        <canvas id="cv"></canvas>
+        <div class="hint" id="hint"></div>
+        <div class="legend" id="legend"></div>
+        <div class="zoom"><button id="zIn" title="Acercar">+</button><button id="zOut" title="Alejar">−</button><button id="zFit" title="Ajustar">⤢</button></div>
+        <div class="probe hidden" id="probe"></div>
+      </div>
+      <aside class="side-panel" id="sidePanel">
+        <div class="panel">
+          <h2>Mapa de calor</h2>
+          <div class="field"><label class="f">Métrica</label><select id="hmMetric"></select></div>
+          <div class="field"><label class="f">Banda</label><div class="seg" id="hmBand"></div></div>
+          <div class="field"><label class="f">Origen</label><select id="hmSource"></select></div>
+          <div class="field" id="profField"><label class="f">Perfil de requisitos</label><select id="hmProfile"></select></div>
+          <div class="field"><label class="f">Señal mínima mostrada <output id="cutOut" class="mono"></output></label><input type="range" id="hmCut" min="-100" max="-60" step="1"></div>
+          <div class="field"><label class="f">Opacidad <output id="opOut" class="mono"></output></label><input type="range" id="hmOpacity" min="0" max="100" step="1"></div>
+          <label class="chk"><input type="checkbox" id="hmContours"> Isolíneas (-67 / -75 dBm)</label>
+          <label class="chk"><input type="checkbox" id="hmLinks"> Mostrar enlaces de clientes</label>
+          <div class="note" id="hmStats"></div>
+        </div>
+        <div class="panel">
+          <h2>Puntos de acceso <span class="actions"><button class="btn sm" id="allOn">Todos</button></span></h2>
+          <div class="ap-list" id="apList"></div>
+        </div>
+        <div class="panel" id="selPanel"></div>
+        <div class="panel hidden" id="walkPanel"></div>
+      </aside>
+    </section>
+
+    <!-- ============================== APs -->
+    <section class="view" id="v-aps">
+      <div class="vh"><div><h1>Puntos de acceso</h1><p>Inventario, radios y estado</p></div>
+        <div class="actions"><button class="btn" id="apAddBtn"><i data-ic="plus"></i>Añadir AP</button></div></div>
+      <div class="panel"><div class="tbl-wrap"><table id="apTable"></table></div></div>
+      <div id="apDetail"></div>
+    </section>
+
+    <!-- ============================== RF / RRM -->
+    <section class="view" id="v-rf">
+      <div class="vh"><div><h1>Radio y RRM</h1><p>Normativa, asignación dinámica de canales (DCA) y control de potencia (TPC)</p></div>
+        <div class="actions"><button class="btn primary" id="rrmRunAll"><i data-ic="zap"></i>Optimizar RF ahora</button></div></div>
+      <div class="cols3" id="rfCols"></div>
+      <div class="panel"><h2>Entorno de propagación</h2><div id="envForm"></div></div>
+      <div class="panel"><h2>Espectro por banda</h2><div id="rfSpec"></div></div>
+    </section>
+
+    <!-- ============================== WLAN -->
+    <section class="view" id="v-wlans">
+      <div class="vh"><div><h1>Redes inalámbricas</h1><p>SSID, seguridad, bandas y roaming</p></div>
+        <div class="actions"><button class="btn primary" id="wlanAdd"><i data-ic="plus"></i>Nueva WLAN</button></div></div>
+      <div class="panel"><div class="tbl-wrap"><table id="wlanTable"></table></div></div>
+      <div class="panel"><h2>Sobrecarga de beacons</h2><div id="beaconInfo"></div></div>
+    </section>
+
+    <!-- ============================== CLIENTES -->
+    <section class="view" id="v-clients">
+      <div class="vh"><div><h1>Clientes</h1><p>Dispositivos simulados, asociación y roaming</p></div>
+        <div class="actions">
+          <label class="chk" style="margin:0 8px 0 0"><input type="checkbox" id="cliMove"> Simular movimiento</label>
+          <select id="cliType" style="width:auto"></select>
+          <button class="btn" id="cliAdd5"><i data-ic="plus"></i>Añadir 5</button>
+          <button class="btn danger" id="cliClear">Quitar todos</button>
+        </div></div>
+      <div class="panel"><div class="tbl-wrap"><table id="cliTable"></table></div></div>
+    </section>
+
+    <!-- ============================== EVENTOS -->
+    <section class="view" id="v-events">
+      <div class="vh"><div><h1>Eventos</h1><p>Registro del controlador</p></div>
+        <div class="actions"><div class="seg" id="evFilter"></div><button class="btn" id="evClear">Vaciar</button></div></div>
+      <div class="panel"><div class="tbl-wrap"><table class="log" id="evTable"></table></div></div>
+    </section>
+
+    <!-- ============================== PROYECTO -->
+    <section class="view" id="v-project">
+      <div class="vh"><div><h1>Proyecto y plano</h1><p>Plano, dimensiones, escala e importación/exportación</p></div></div>
+      <div class="cols">
+        <div class="panel"><h2>Plano</h2><div id="floorForm"></div></div>
+        <div class="panel"><h2>Proyecto</h2><div id="projForm"></div></div>
+      </div>
+      <div class="panel"><h2>Materiales de muro</h2><div class="tbl-wrap"><table id="matTable"></table></div></div>
+    </section>
+  </main>
+</div>
+<div class="toasts" id="toasts"></div>
+<input type="file" id="fileImg" accept="image/*" class="hidden">
+<input type="file" id="fileJson" accept=".json,application/json" class="hidden">
+<script src="rf.js"></script>
+<script src="core.js"></script>
+<script src="map.js"></script>
+<script src="views.js"></script>
+</body>
+</html>

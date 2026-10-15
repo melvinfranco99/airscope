@@ -9,3 +9,8 @@ Terminal=false
 Categories=Network;Monitor;Qt;
 Keywords=wifi;wlan;inssider;analyzer;spectrum;channel;dbm;
 StartupWMClass=airscope
+Actions=controller;
+
+[Desktop Action controller]
+Name=Controlador WLAN (simulador)
+Exec=airscope --controller

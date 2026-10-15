@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDouble
 
 from . import APP_NAME, __version__
 from . import charts as C
+from . import controller
 from . import scanner
 from . import theme as T
 from . import wifi_math as wm
@@ -502,6 +503,10 @@ class MainWindow(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(spacer)
+        btn_ctl = QPushButton("▦  Controlador WLAN")
+        btn_ctl.setToolTip("Simulador de controlador: plano, puntos de acceso y mapas de calor")
+        btn_ctl.clicked.connect(self.open_controller)
+        tb.addWidget(btn_ctl)
         btn_csv = QPushButton("⤓  Exportar CSV")
         btn_csv.clicked.connect(self.export_csv)
         tb.addWidget(btn_csv)
@@ -877,6 +882,16 @@ class MainWindow(QMainWindow):
                 w.writerow([getattr(a, f) for f in fields])
         self.status.showMessage(f"Exportado a {path}", 6000)
 
+    def open_controller(self):
+        w = controller.open_controller()
+        if w is None:
+            QMessageBox.information(self, "Controlador WLAN",
+                                    "Se ha abierto el simulador en tu navegador.\n\n"
+                                    "Para verlo dentro de AirScope instala python-pyqt6-webengine "
+                                    "(Arch) o python3-pyqt6.qtwebengine (Debian/Ubuntu).")
+        else:
+            self._controllers = getattr(self, "_controllers", []) + [w]
+
     def about(self):
         QMessageBox.about(self, f"Acerca de {APP_NAME}",
                           f"<h2>{APP_NAME} {__version__}</h2>"
@@ -898,8 +913,9 @@ class MainWindow(QMainWindow):
 
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
-        print(f"{APP_NAME} {__version__} - Analizador WiFi\n\nUso: airscope [--demo]\n"
-              "  --demo   usa datos sintéticos (sin tarjeta WiFi)")
+        print(f"{APP_NAME} {__version__} - Analizador WiFi\n\nUso: airscope [--demo] [--controller]\n"
+              "  --demo         usa datos sintéticos (sin tarjeta WiFi)\n"
+              "  --controller   abre solo el simulador de controlador WLAN")
         return
     if "--version" in sys.argv:
         print(__version__)
@@ -909,8 +925,13 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(T.STYLESHEET)
-    w = MainWindow()
-    w.show()
+    if "--controller" in sys.argv:
+        w = controller.open_controller()
+        if w is None:
+            return
+    else:
+        w = MainWindow()
+        w.show()
     sys.exit(app.exec())
 
 

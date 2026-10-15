@@ -7,7 +7,8 @@ arch=('any')
 url="https://github.com/melvinfranco99/airscope"
 license=('MIT')
 depends=('python' 'python-pyqt6' 'networkmanager' 'iw')
-optdepends=('hwdata: nombres de fabricantes (OUI)')
+optdepends=('hwdata: nombres de fabricantes (OUI)'
+            'python-pyqt6-webengine: simulador de controlador WLAN dentro de la app')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
@@ -15,6 +16,7 @@ package() {
     cd "$srcdir/$pkgname-$pkgver"
     install -d "$pkgdir/usr/lib/$pkgname"
     cp -r airscope "$pkgdir/usr/lib/$pkgname/"
+    cp -r docs/controller "$pkgdir/usr/lib/$pkgname/airscope/controller"
     install -Dm755 /dev/stdin "$pkgdir/usr/bin/airscope" <<LAUNCH
 #!/bin/sh
 export PYTHONPATH=/usr/lib/$pkgname
