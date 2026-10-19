@@ -105,18 +105,33 @@ const RF = (() => {
   const mwToDbm = m => 10 * Math.log10(Math.max(m, 1e-15));
 
   /* ------------------------------------------------------------ materiales */
+  // loss = atenuación (dB) con el grosor de referencia t (m). Los elementos «fixed»
+  // (cristal, puertas…) no escalan con el grosor.
   const MATERIALS = {
-    drywall:  { name: 'Pladur / tabique',        loss: { '2.4': 3,  '5': 4,  '6': 5  }, color: '#dbeafe', w: 2 },
-    brick:    { name: 'Ladrillo',                loss: { '2.4': 6,  '5': 10, '6': 12 }, color: '#f97316', w: 3 },
-    concrete: { name: 'Hormigón',                loss: { '2.4': 12, '5': 17, '6': 20 }, color: '#a8a29e', w: 4 },
-    heavy:    { name: 'Muro de carga (armado)',  loss: { '2.4': 18, '5': 25, '6': 30 }, color: '#e7e5e4', w: 5 },
-    glass:    { name: 'Cristal',                 loss: { '2.4': 2,  '5': 3,  '6': 4  }, color: '#67e8f9', w: 2 },
-    lowe:     { name: 'Cristal bajo emisivo',    loss: { '2.4': 12, '5': 16, '6': 18 }, color: '#2dd4bf', w: 2 },
-    wood:     { name: 'Puerta de madera',        loss: { '2.4': 3,  '5': 4,  '6': 5  }, color: '#d97706', w: 3 },
-    cubicle:  { name: 'Mampara / panel',         loss: { '2.4': 1,  '5': 2,  '6': 2  }, color: '#64748b', w: 1.5 },
-    shelf:    { name: 'Estantería / almacén',    loss: { '2.4': 6,  '5': 9,  '6': 11 }, color: '#a78bfa', w: 3 },
-    metal:    { name: 'Metal / ascensor',        loss: { '2.4': 30, '5': 35, '6': 40 }, color: '#f43f5e', w: 4 },
+    drywall:  { name: 'Pladur / tabique',         loss: { '2.4': 3,  '5': 4,  '6': 5  }, t: 0.10, color: '#dbeafe' },
+    woodwall: { name: 'Tabique de madera',        loss: { '2.4': 4,  '5': 6,  '6': 7  }, t: 0.10, color: '#fbbf24' },
+    brick:    { name: 'Ladrillo',                 loss: { '2.4': 6,  '5': 10, '6': 12 }, t: 0.15, color: '#f97316' },
+    block:    { name: 'Bloque de hormigón',       loss: { '2.4': 10, '5': 14, '6': 16 }, t: 0.20, color: '#cbd5e1' },
+    concrete: { name: 'Hormigón',                 loss: { '2.4': 12, '5': 17, '6': 20 }, t: 0.20, color: '#a8a29e' },
+    heavy:    { name: 'Muro de carga (armado)',   loss: { '2.4': 18, '5': 25, '6': 30 }, t: 0.30, color: '#e7e5e4' },
+    stone:    { name: 'Piedra',                   loss: { '2.4': 15, '5': 22, '6': 26 }, t: 0.40, color: '#d6d3d1' },
+    glass:    { name: 'Cristal',                  loss: { '2.4': 2,  '5': 3,  '6': 4  }, t: 0.02, color: '#67e8f9', fixed: true },
+    lowe:     { name: 'Cristal bajo emisivo',     loss: { '2.4': 12, '5': 16, '6': 18 }, t: 0.03, color: '#2dd4bf', fixed: true },
+    window:   { name: 'Ventana (doble cristal)',  loss: { '2.4': 4,  '5': 6,  '6': 7  }, t: 0.08, color: '#7dd3fc', fixed: true },
+    wood:     { name: 'Puerta de madera',         loss: { '2.4': 3,  '5': 4,  '6': 5  }, t: 0.05, color: '#d97706', fixed: true },
+    metaldoor:{ name: 'Puerta metálica / cortafuegos', loss: { '2.4': 15, '5': 20, '6': 22 }, t: 0.06, color: '#fb7185', fixed: true },
+    cubicle:  { name: 'Mampara / panel',          loss: { '2.4': 1,  '5': 2,  '6': 2  }, t: 0.05, color: '#64748b', fixed: true },
+    shelf:    { name: 'Estantería / almacén',     loss: { '2.4': 6,  '5': 9,  '6': 11 }, t: 0.40, color: '#a78bfa' },
+    water:    { name: 'Agua (acuario, depósito)', loss: { '2.4': 25, '5': 30, '6': 32 }, t: 0.30, color: '#3b82f6' },
+    metal:    { name: 'Metal / ascensor',         loss: { '2.4': 30, '5': 35, '6': 40 }, t: 0.05, color: '#f43f5e', fixed: true },
   };
+  /** Factor por grosor: un muro el doble de grueso atenúa el doble (acotado). */
+  const thickK = w => {
+    const m = MATERIALS[w.mat];
+    return m.fixed || !w.t ? 1 : Math.max(0.25, Math.min(4, w.t / m.t));
+  };
+  const wallLoss = (w, band) => MATERIALS[w.mat].loss[band] * (w.k ?? thickK(w));
+
 
   /* ------------------------------------------------------------- modelos AP */
   const MODELS = {
@@ -186,7 +201,7 @@ const RF = (() => {
     const d = Math.max(Math.sqrt(dx * dx + dy * dy + dh * dh), 0.3);
     const f = BAND_FREQ[band];
     let pl = fspl1m(f) + (d <= 1 ? 20 * Math.log10(d) : 10 * ple * Math.log10(d));
-    for (const w of walls) if (segX(x1, y1, x2, y2, w.x1, w.y1, w.x2, w.y2)) pl += MATERIALS[w.mat].loss[band];
+    for (const w of walls) if (segX(x1, y1, x2, y2, w.x1, w.y1, w.x2, w.y2)) pl += wallLoss(w, band);
     return pl;
   }
 
@@ -215,7 +230,7 @@ const RF = (() => {
     const wl = bands.map(() => new Float64Array(W));
     walls.forEach((w, i) => {
       wx1[i] = w.x1; wy1[i] = w.y1; wx2[i] = w.x2; wy2[i] = w.y2;
-      bands.forEach((b, k) => { wl[k][i] = MATERIALS[w.mat].loss[b]; });
+      bands.forEach((b, k) => { wl[k][i] = wallLoss(w, b); });
     });
     const base = bands.map(b => fspl1m(BAND_FREQ[b]));
     const ple = bands.map(b => env.ple[b]);
@@ -372,7 +387,7 @@ const RF = (() => {
     BANDS, BAND_LABEL, BAND_FREQ, WIDTHS, COUNTRIES, DFS, WEATHER_RADAR, MATERIALS, MODELS, CLIENT_TYPES,
     MCS_SNR, MCS_RATE20, MCS_MOD, chFreq, block, span, validChannel, channelsFor, isDfs, maxEirp, overlap,
     noiseFloor, dbmToMw, mwToDbm, phyRate, pathLoss, lossMap, rssiAt, patternGain, coupling, dca, tpc,
-    beaconAirtime, segX,
+    beaconAirtime, segX, thickK, wallLoss,
   };
 })();
 

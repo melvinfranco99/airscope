@@ -46,6 +46,8 @@ const TOOLS = [
   ['ap', 'ap', 'Colocar punto de acceso (A)', 'a'],
   ['wall', 'wall', 'Dibujar muro (W)', 'w'],
   ['room', 'room', 'Dibujar sala rectangular (R)', 'r'],
+  ['column', 'pillar', 'Columna u obstáculo (O)', 'o'],
+  ['door', 'door', 'Puerta o ventana en un muro (D)', 'd'],
   ['client', 'phone', 'Añadir cliente (C)', 'c'],
   '-',
   ['measure', 'ruler', 'Medir distancia (M)', 'm'],
@@ -62,6 +64,12 @@ const MapView = (() => {
   const vw = { scale: 20, ox: 40, oy: 40 };
   let tool = 'select', wallMat = 'drywall', apModelSel = 'AS-660E', cliTypeSel = 'phone';
   let sel = null, drag = null, draft = null, hover = null, measure = null;
+  let wallT = null, typed = '', doorHover = null, detectMode = false, detectPrev = null;
+  const col = { preset: 'col40', shape: 'rect', w: 0.4, h: 0.4, mat: 'concrete' };
+  const open = { type: 'door', w: 0.9 };
+  const det = { sens: 0.25, minLen: 0.8, minThick: 5, replace: true };
+  const wallSel = i => sel?.kind === 'wall' && sel.i === i || sel?.kind === 'multi' && sel.walls.has(i);
+  const colSel = id => sel?.kind === 'column' && sel.id === id || sel?.kind === 'multi' && sel.cols.has(id);
   let heat = null, heatDirty = true, contours = [], borders = [];
   const heatCv = document.createElement('canvas'), hctx = heatCv.getContext('2d');
   let img = null, imgSrc = null, blink = null, walk = null, walkAnim = null;
@@ -277,21 +285,24 @@ const MapView = (() => {
     // fondo azul = sin señal
     c.fillStyle = '#0a1a3a'; c.fillRect(0, 0, w, h);
     const [fx, fy] = S(0, 0), fw = P.floor.w * V.scale, fh = P.floor.h * V.scale;
-    if (heat) { const g = heat.grid, [hx, hy] = S(g.x0, g.y0); c.fillStyle = '#0f2a5c'; c.fillRect(hx, hy, g.cols * g.res * V.scale, g.rows * g.res * V.scale); }
+    const showHeat = heat && !P.heat.hideMap;
+    if (showHeat) { const g = heat.grid, [hx, hy] = S(g.x0, g.y0); c.fillStyle = '#0f2a5c'; c.fillRect(hx, hy, g.cols * g.res * V.scale, g.rows * g.res * V.scale); }
     c.fillStyle = '#163a7a'; c.fillRect(fx, fy, fw, fh);
-    if (P.floor.showGrid) drawGrid(c, V, fx, fy, fw, fh);
     const hasImg = img && img.complete && img.naturalWidth;
-    if (heat) {
+    // modo calco: la foto se ve tal cual, sin mapa de calor encima
+    if (hasImg && !showHeat) { c.globalAlpha = P.floor.imgOpacity; c.drawImage(img, fx, fy, fw, fh); c.globalAlpha = 1; }
+    if (P.floor.showGrid) drawGrid(c, V, fx, fy, fw, fh);
+    if (showHeat) {
       const g = heat.grid, [hx, hy] = S(g.x0, g.y0), hw = g.cols * g.res * V.scale, hh = g.rows * g.res * V.scale;
       c.save(); c.globalAlpha = P.heat.opacity / 100; c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
       c.drawImage(heatCv, hx, hy, hw, hh);
       c.restore();
     }
     // el plano se multiplica sobre el mapa: sus líneas se ven a través del color
-    if (hasImg) {
+    if (hasImg && showHeat) {
       c.save(); c.globalAlpha = P.floor.imgOpacity; c.globalCompositeOperation = 'multiply'; c.drawImage(img, fx, fy, fw, fh); c.restore();
     }
-    if (heat) {
+    if (showHeat) {
       const stroke = (segs, style, lw, dash) => {
         if (!segs.length) return;
         c.beginPath();
@@ -306,17 +317,13 @@ const MapView = (() => {
       stroke(borders, 'rgba(255,255,255,.95)', 1.5, [7, 4]);
     }
     c.strokeStyle = 'rgba(147,197,253,.55)'; c.lineWidth = 1; c.strokeRect(fx + .5, fy + .5, fw, fh);
-    // muros
-    const lwF = clamp(V.scale / 22, 0.7, 2.2);
-    P.walls.forEach((wl, i) => {
-      const m = RF.MATERIALS[wl.mat], a = S(wl.x1, wl.y1), b = S(wl.x2, wl.y2);
+    drawWalls(c, S, V);
+    drawColumns(c, S);
+    if (detectPrev) for (const w of detectPrev) {
+      const a = S(w.x1, w.y1), b = S(w.x2, w.y2);
       c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]);
-      const isSel = sel?.kind === 'wall' && sel.i === i;
-      if (isSel) { c.strokeStyle = 'rgba(34,211,238,.45)'; c.lineWidth = m.w * lwF + 7; c.stroke(); }
-      c.strokeStyle = 'rgba(6,16,38,.85)'; c.lineWidth = m.w * lwF + 2.2; c.lineCap = 'round'; c.stroke();
-      c.strokeStyle = m.color; c.lineWidth = m.w * lwF; c.stroke();
-      if (isSel) for (const p of [a, b]) { c.beginPath(); c.arc(p[0], p[1], 5, 0, 7); c.fillStyle = '#22d3ee'; c.fill(); }
-    });
+      c.strokeStyle = 'rgba(236,72,153,.9)'; c.lineWidth = Math.max(3, w.t * V.scale); c.lineCap = 'butt'; c.stroke();
+    }
     // enlaces de clientes
     const apById = id => P.aps.find(a => a.id === id);
     if (P.heat.links || sel?.kind === 'client') for (const cl of P.clients) {
@@ -342,6 +349,54 @@ const MapView = (() => {
     // borradores
     drawDraft(c, S);
     if (!forExport) drawScaleBar(c, V, w, h);
+  }
+
+  /** Muros a su grosor real, con puertas, ventanas y cotas. */
+  function drawWalls(c, S, V) {
+    const order = P.walls.map((w, i) => i).sort((a, b) => (P.walls[a].opening ? 1 : 0) - (P.walls[b].opening ? 1 : 0));
+    for (const i of order) {
+      const wl = P.walls[i], m = RF.MATERIALS[wl.mat], a = S(wl.x1, wl.y1), b = S(wl.x2, wl.y2);
+      const lw = Math.max(m.fixed ? 2 : 2.5, (wl.t || m.t) * V.scale);
+      const isSel = wallSel(i);
+      c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]);
+      c.lineCap = wl.opening ? 'butt' : 'square';
+      if (isSel) { c.strokeStyle = 'rgba(34,211,238,.5)'; c.lineWidth = lw + 8; c.stroke(); }
+      c.strokeStyle = 'rgba(6,16,38,.85)'; c.lineWidth = lw + 2; c.stroke();
+      c.strokeStyle = m.color; c.lineWidth = lw; c.stroke();
+      if (wl.opening === 'window') { c.strokeStyle = 'rgba(6,16,38,.75)'; c.lineWidth = Math.max(1, lw * 0.3); c.stroke(); }
+      if (wl.opening && wl.opening.endsWith('door')) {          // hoja y barrido de la puerta
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(a[0] + Math.cos(ang - Math.PI / 2) * L, a[1] + Math.sin(ang - Math.PI / 2) * L);
+        c.arc(a[0], a[1], L, ang - Math.PI / 2, ang);
+        c.strokeStyle = m.color + 'aa'; c.lineWidth = 1.2; c.setLineDash([3, 3]); c.stroke(); c.setLineDash([]);
+      }
+      if (P.floor.showDims && !wl.opening) {
+        const len = Math.hypot(wl.x2 - wl.x1, wl.y2 - wl.y1);
+        if (len * V.scale > 46) {
+          let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+          if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+          c.save(); c.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2); c.rotate(ang);
+          const t = `${fmt(len, 2)} m`; c.font = '600 10px Inter,sans-serif';
+          const tw = c.measureText(t).width + 8, off = -lw / 2 - 9;
+          c.fillStyle = 'rgba(10,16,32,.85)'; c.beginPath(); c.roundRect(-tw / 2, off - 7, tw, 14, 4); c.fill();
+          c.fillStyle = '#fde68a'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(t, 0, off); c.restore();
+          c.textBaseline = 'alphabetic';
+        }
+      }
+      if (sel?.kind === 'wall' && sel.i === i) for (const p of [a, b]) { c.beginPath(); c.arc(p[0], p[1], 5, 0, 7); c.fillStyle = '#22d3ee'; c.fill(); }
+    }
+  }
+
+  function drawColumns(c, S) {
+    for (const co of P.columns) {
+      const m = RF.MATERIALS[co.mat], pts = Plan.columnOutline(co).map(p => S(p.x, p.y));
+      c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath();
+      if (colSel(co.id)) { c.strokeStyle = 'rgba(34,211,238,.6)'; c.lineWidth = 8; c.stroke(); }
+      c.fillStyle = m.color; c.fill();
+      c.strokeStyle = 'rgba(6,16,38,.9)'; c.lineWidth = 1.5; c.stroke();
+      // aspa: se reconoce como pilar/obstáculo macizo
+      if (co.shape !== 'round') { c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); c.lineTo(pts[2][0], pts[2][1]); c.moveTo(pts[1][0], pts[1][1]); c.lineTo(pts[3][0], pts[3][1]); c.strokeStyle = 'rgba(6,16,38,.45)'; c.lineWidth = 1; c.stroke(); }
+    }
   }
 
   function drawGrid(c, V, fx, fy, fw, fh) {
@@ -438,7 +493,34 @@ const MapView = (() => {
     if (draft?.kind === 'wall' && draft.pts.length) {
       const m = RF.MATERIALS[wallMat];
       for (let i = 1; i < draft.pts.length; i++) { const p = S(draft.pts[i - 1].x, draft.pts[i - 1].y), q = S(draft.pts[i].x, draft.pts[i].y); c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(q[0], q[1]); c.strokeStyle = m.color; c.lineWidth = 3; c.stroke(); }
-      if (hover) { const a = draft.pts[draft.pts.length - 1]; line(a, hover, m.color, `${fmt(dist(a, hover), 2)} m`); }
+      if (hover) { const a = draft.pts[draft.pts.length - 1]; line(a, hover, m.color, typed ? `${typed.replace('.', ',')} m ⏎` : `${fmt(dist(a, hover), 2)} m`); }
+    }
+    if ((draft?.kind === 'column' || draft?.kind === 'box') && draft.b) {
+      const a = S(draft.a.x, draft.a.y), b = S(draft.b.x, draft.b.y);
+      c.strokeStyle = draft.kind === 'box' ? '#22d3ee' : RF.MATERIALS[col.mat].color; c.lineWidth = 1.5; c.setLineDash([5, 4]);
+      c.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]); c.setLineDash([]);
+      if (draft.kind === 'column') { c.font = '700 12px Inter,sans-serif'; c.fillStyle = '#fff'; c.textAlign = 'center';
+        c.fillText(`${Math.round(Math.abs(draft.b.x - draft.a.x) * 100)} × ${Math.round(Math.abs(draft.b.y - draft.a.y) * 100)} cm`, (a[0] + b[0]) / 2, Math.min(a[1], b[1]) - 6); }
+    }
+    if (tool === 'column' && hover && !draft) {
+      const pts = Plan.columnOutline({ ...col, x: hover.x, y: hover.y }).map(p => S(p.x, p.y));
+      c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath();
+      c.strokeStyle = 'rgba(34,211,238,.9)'; c.setLineDash([3, 3]); c.lineWidth = 1.5; c.stroke(); c.setLineDash([]);
+    }
+    if (tool === 'door' && doorHover) {
+      const w = P.walls[doorHover.i];
+      if (w) {
+        const L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), ux = (w.x2 - w.x1) / L, uy = (w.y2 - w.y1) / L, hw = Math.min(open.w, L) / 2;
+        const a = S(doorHover.p.x - ux * hw, doorHover.p.y - uy * hw), b = S(doorHover.p.x + ux * hw, doorHover.p.y + uy * hw);
+        c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.strokeStyle = 'rgba(34,211,238,.95)'; c.lineWidth = 7; c.lineCap = 'butt'; c.stroke();
+      }
+    }
+    if (draft?.kind === 'warp') {
+      const pts = draft.pts.concat(hover ? [hover] : []).map(p => S(p.x, p.y));
+      c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); if (pts.length === 4) c.closePath();
+      c.strokeStyle = '#facc15'; c.lineWidth = 2; c.setLineDash([6, 4]); c.stroke(); c.setLineDash([]);
+      draft.pts.forEach((q, i) => { const [x, y] = S(q.x, q.y); c.beginPath(); c.arc(x, y, 6, 0, 7); c.fillStyle = '#facc15'; c.fill();
+        c.fillStyle = '#0b1120'; c.font = '700 10px Inter,sans-serif'; c.textAlign = 'center'; c.fillText(i + 1, x, y + 3.5); });
     }
     if (draft?.kind === 'room' && draft.b) {
       const a = S(draft.a.x, draft.a.y), b = S(draft.b.x, draft.b.y);
@@ -468,6 +550,10 @@ const MapView = (() => {
     const tol = 15 / vw.scale;
     for (let i = P.aps.length - 1; i >= 0; i--) { const a = P.aps[i]; if (Math.hypot(a.x - p.x, a.y - p.y) < tol) return { kind: 'ap', id: a.id }; }
     for (const cl of P.clients) if (Math.hypot(cl.x - p.x, cl.y - p.y) < 9 / vw.scale) return { kind: 'client', id: cl.id };
+    for (let i = P.columns.length - 1; i >= 0; i--) {
+      const co = P.columns[i], t = 4 / vw.scale;
+      if (Math.abs(p.x - co.x) <= co.w / 2 + t && Math.abs(p.y - co.y) <= co.h / 2 + t) return { kind: 'column', id: co.id };
+    }
     let best = null, bd = 7 / vw.scale;
     P.walls.forEach((w, i) => {
       for (const [ex, ey, end] of [[w.x1, w.y1, 1], [w.x2, w.y2, 2]]) if (sel?.kind === 'wall' && sel.i === i && Math.hypot(ex - p.x, ey - p.y) < 9 / vw.scale) { best = { kind: 'wall', i, end }; bd = 0; }
@@ -503,7 +589,7 @@ const MapView = (() => {
   const pos = e => { const r = cv.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top }; };
 
   function onDown(e) {
-    cv.setPointerCapture(e.pointerId);
+    try { cv.setPointerCapture(e.pointerId); } catch (_) { /* puntero sintético */ }
     const { sx, sy } = pos(e);
     pointers.set(e.pointerId, { sx, sy });
     if (pointers.size === 2) {
@@ -518,13 +604,31 @@ const MapView = (() => {
     switch (tool) {
       case 'select': {
         const h = hit(p);
+        if (e.shiftKey) {                                   // selección múltiple
+          if (h && (h.kind === 'wall' || h.kind === 'column')) { toggleMulti(h); return; }
+          if (!h) { draft = { kind: 'box', a: p, b: null }; return; }
+        }
         if (!h) { select(null); drag = { kind: 'pan', sx, sy, ox: vw.ox, oy: vw.oy }; return; }
         if (h.kind === 'wall' && h.end) { const w = P.walls[h.i]; drag = { kind: 'wallEnd', i: h.i, end: h.end, ox: h.end === 1 ? w.x1 : w.x2, oy: h.end === 1 ? w.y1 : w.y2, moved: false }; return; }
         select(h);
         if (h.kind === 'ap') { const a = P.aps.find(x => x.id === h.id); drag = { kind: 'ap', ap: a, dx: a.x - p.x, dy: a.y - p.y, moved: false }; }
         if (h.kind === 'client') { const c = P.clients.find(x => x.id === h.id); drag = { kind: 'client', cl: c, dx: c.x - p.x, dy: c.y - p.y, moved: false }; }
         if (h.kind === 'wall') { const w = P.walls[h.i]; drag = { kind: 'wall', w, p0: p, o: { ...w }, moved: false }; }
+        if (h.kind === 'column') { const co = P.columns.find(x => x.id === h.id); drag = { kind: 'column', co, dx: co.x - p.x, dy: co.y - p.y, moved: false }; }
         return;
+      }
+      case 'column': { draft = { kind: 'column', a: inFloor(p), b: null }; return; }
+      case 'door': {
+        const hw = nearestWall(p, 14 / vw.scale);
+        if (!hw) { toast('Haz clic sobre un muro para insertar la puerta o ventana', 'warn'); return; }
+        Plan.insertOpening(hw.i, hw.p, open.type, open.w);
+        sel = null; doorHover = null; geometryChanged(); return;
+      }
+      case 'warp': {
+        if (!draft) draft = { kind: 'warp', pts: [] };
+        draft.pts.push(inFloor(p));
+        if (draft.pts.length === 4) { const pts = draft.pts; draft = null; askWarp(pts); }
+        draw(); return;
       }
       case 'ap': {
         const q = inFloor(p);
@@ -550,8 +654,8 @@ const MapView = (() => {
         else {
           const a = draft.pts[draft.pts.length - 1];
           if (Math.hypot(q.x - a.x, q.y - a.y) > 0.05) {
-            P.walls.push({ x1: a.x, y1: a.y, x2: q.x, y2: q.y, mat: wallMat });
-            draft.pts.push(q);
+            P.walls.push(newWall(a, q));
+            draft.pts.push(q); typed = '';
             geometryChanged(false);
           }
         }
@@ -597,6 +701,7 @@ const MapView = (() => {
           heatDirty = true; break;
         }
         case 'client': { const q = inFloor({ x: p.x + drag.dx, y: p.y + drag.dy }); drag.cl.x = q.x; drag.cl.y = q.y; drag.moved = true; associate(drag.cl, false); break; }
+        case 'column': { const q = inFloor({ x: p.x + drag.dx, y: p.y + drag.dy }); drag.co.x = q.x; drag.co.y = q.y; drag.moved = true; break; }
         case 'wall': {
           const dx = p.x - drag.p0.x, dy = p.y - drag.p0.y;
           Object.assign(drag.w, { x1: drag.o.x1 + dx, y1: drag.o.y1 + dy, x2: drag.o.x2 + dx, y2: drag.o.y2 + dy });
@@ -616,7 +721,8 @@ const MapView = (() => {
       }
       requestDraw(); return;
     }
-    if (draft && (draft.kind === 'room' || draft.kind === 'measure' || draft.kind === 'calib') && pointers.size) {
+    doorHover = tool === 'door' ? nearestWall(p, 14 / vw.scale) : null;
+    if (draft && (draft.kind === 'room' || draft.kind === 'measure' || draft.kind === 'calib' || draft.kind === 'column' || draft.kind === 'box') && pointers.size) {
       draft.b = draft.kind === 'room' ? snap(p, null, e.altKey) : inFloor(p);
     }
     if (tool === 'select' && !draft) {
@@ -638,21 +744,24 @@ const MapView = (() => {
       Heat.coarse = false; heatDirty = true;
       topologyChanged('AP movido');
     } else if (d?.kind === 'client' && d.moved) { associate(d.cl); changed(); }
-    else if ((d?.kind === 'wall' || d?.kind === 'wallEnd') && d.moved) geometryChanged();
-    if (draft && (draft.kind === 'room' || draft.kind === 'measure' || draft.kind === 'calib')) {
-      const { a, b } = draft; draft = null;
+    else if ((d?.kind === 'wall' || d?.kind === 'wallEnd' || d?.kind === 'column') && d.moved) geometryChanged();
+    if (draft && ['room', 'measure', 'calib', 'column', 'box'].includes(draft.kind)) {
+      const { a, b, kind } = draft; draft = null;
+      if (kind === 'column') { addColumn(a, b); return; }
       if (!b || Math.hypot(b.x - a.x, b.y - a.y) < 0.2) { draw(); return; }
-      if (tool === 'room') {
+      if (kind === 'box') { boxSelect(a, b); return; }
+      if (kind === 'room') {
         const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x), y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
-        [[x1, y1, x2, y1], [x2, y1, x2, y2], [x2, y2, x1, y2], [x1, y2, x1, y1]].forEach(([p, q, r, s]) => P.walls.push({ x1: p, y1: q, x2: r, y2: s, mat: wallMat }));
+        [[x1, y1, x2, y1], [x2, y1, x2, y2], [x2, y2, x1, y2], [x1, y2, x1, y1]].forEach(([p, q, r, s]) => P.walls.push(newWall({ x: p, y: q }, { x: r, y: s })));
         geometryChanged();
-      } else if (tool === 'measure') { measure = { a, b }; }
+      } else if (kind === 'measure') { measure = { a, b }; }
       else calibrate(a, b);
       draw();
     }
   }
 
   function finishDraft() {
+    typed = '';
     if (draft?.kind === 'wall') { draft = null; geometryChanged(); }
     else if (draft?.kind === 'walk') {
       if (draft.pts.length >= 2) { P.walk = { pts: draft.pts, type: P.walk?.type || 'phone', speed: P.walk?.speed || 5 }; draft = null; computeWalk(); save(); }
@@ -680,6 +789,7 @@ const MapView = (() => {
     P.floor.w *= kx; P.floor.h *= ky;
     for (const w of P.walls) { w.x1 *= kx; w.x2 *= kx; w.y1 *= ky; w.y2 *= ky; }
     for (const o of [...P.aps, ...P.clients]) { o.x *= kx; o.y *= ky; }
+    for (const co of P.columns) { co.x *= kx; co.y *= ky; co.w *= kx; co.h *= ky; }
     if (P.walk) for (const q of P.walk.pts) { q.x *= kx; q.y *= ky; }
     measure = null; walk = null;
     geometryChanged();
@@ -701,7 +811,116 @@ const MapView = (() => {
     } else if (h.kind === 'wall') {
       P.walls.splice(h.i, 1);
       sel = null; geometryChanged();
+    } else if (h.kind === 'column') {
+      P.columns = P.columns.filter(c => c.id !== h.id);
+      sel = null; geometryChanged();
+    } else if (h.kind === 'multi') {
+      P.walls = P.walls.filter((w, i) => !h.walls.has(i));
+      P.columns = P.columns.filter(c => !h.cols.has(c.id));
+      sel = null; geometryChanged();
     }
+  }
+
+  /* ------------------------------------------------ edición del plano */
+  function newWall(a, b) {
+    const w = { x1: a.x, y1: a.y, x2: b.x, y2: b.y, mat: wallMat };
+    if (wallT && !RF.MATERIALS[wallMat].fixed) w.t = wallT;
+    return w;
+  }
+
+  function nearestWall(p, tol) {
+    let best = null, bd = tol;
+    P.walls.forEach((w, i) => {
+      const d = segDist(p, w);
+      if (d < bd) {
+        const dx = w.x2 - w.x1, dy = w.y2 - w.y1, L2 = dx * dx + dy * dy;
+        const t = L2 ? clamp(((p.x - w.x1) * dx + (p.y - w.y1) * dy) / L2, 0, 1) : 0;
+        bd = d; best = { i, p: { x: w.x1 + dx * t, y: w.y1 + dy * t } };
+      }
+    });
+    return best;
+  }
+
+  function addColumn(a, b) {
+    let c;
+    if (b && Math.abs(b.x - a.x) > 0.1 && Math.abs(b.y - a.y) > 0.1)
+      c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
+    else c = { x: a.x, y: a.y, w: col.w, h: col.h };
+    const co = { id: uid('co'), shape: col.shape, mat: col.mat, ...c };
+    P.columns.push(co);
+    sel = { kind: 'column', id: co.id };
+    geometryChanged();
+  }
+
+  function toggleMulti(h) {
+    const m = sel?.kind === 'multi' ? sel : { kind: 'multi', walls: new Set(), cols: new Set() };
+    if (sel?.kind === 'wall') m.walls.add(sel.i);
+    if (sel?.kind === 'column') m.cols.add(sel.id);
+    const t = (set, k) => set.has(k) ? set.delete(k) : set.add(k);
+    if (h.kind === 'wall') t(m.walls, h.i); else t(m.cols, h.id);
+    select(m.walls.size + m.cols.size ? m : null);
+  }
+
+  function boxSelect(a, b) {
+    const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x), y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
+    const inR = (x, y) => x >= x1 && x <= x2 && y >= y1 && y <= y2;
+    const m = sel?.kind === 'multi' ? sel : { kind: 'multi', walls: new Set(), cols: new Set() };
+    P.walls.forEach((w, i) => { if (inR(w.x1, w.y1) && inR(w.x2, w.y2)) m.walls.add(i); });
+    P.columns.forEach(c => { if (inR(c.x, c.y)) m.cols.add(c.id); });
+    select(m.walls.size + m.cols.size ? m : null);
+  }
+
+  /** Cambia la longitud de un muro manteniendo su inicio (arrastra los muros unidos al final). */
+  function setWallLength(i, L) {
+    const w = P.walls[i], cur = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+    if (!(L > 0) || !cur) return;
+    const nx = w.x1 + (w.x2 - w.x1) * L / cur, ny = w.y1 + (w.y2 - w.y1) * L / cur, ox = w.x2, oy = w.y2;
+    for (const o of P.walls) {
+      if (Math.hypot(o.x1 - ox, o.y1 - oy) < 1e-6) { o.x1 = nx; o.y1 = ny; }
+      if (Math.hypot(o.x2 - ox, o.y2 - oy) < 1e-6) { o.x2 = nx; o.y2 = ny; }
+    }
+    geometryChanged();
+  }
+
+  function applyTyped() {
+    const L = parseFloat(typed);
+    typed = '';
+    if (!(L > 0) || draft?.kind !== 'wall') { draw(); return; }
+    const a = draft.pts[draft.pts.length - 1];
+    let dx = 1, dy = 0;
+    if (hover && Math.hypot(hover.x - a.x, hover.y - a.y) > 0.01) { const d = Math.hypot(hover.x - a.x, hover.y - a.y); dx = (hover.x - a.x) / d; dy = (hover.y - a.y) / d; }
+    const q = { x: a.x + dx * L, y: a.y + dy * L };
+    if (q.x < -0.01 || q.y < -0.01 || q.x > P.floor.w + 0.01 || q.y > P.floor.h + 0.01) toast('El tramo se sale del plano: amplía sus dimensiones o calibra la escala', 'warn');
+    P.walls.push(newWall(a, q));
+    draft.pts.push(q);
+    geometryChanged(false);
+  }
+
+  function askWarp(pts) {
+    const has = P.walls.length + P.columns.length;
+    const run = async clear => {
+      try {
+        if (clear) { P.walls = []; P.columns = []; }
+        await Plan.warp(pts);
+        Heat.invalidate(); heatDirty = true; fitted = false;
+        logEvent('ok', 'Plano', 'Foto enderezada (corrección de perspectiva)');
+        save(); UI.refresh(); fit(); setTool('calib');
+        toast('Foto enderezada. Ahora marca una distancia conocida para fijar la escala.', 'ok');
+      } catch (e) { console.error(e); toast('No se pudo enderezar la imagen', 'crit'); }
+    };
+    Modal.open('Enderezar foto', `<p>Se corregirá la perspectiva para que las 4 esquinas marcadas formen un rectángulo.</p>
+      ${has ? `<p class="dim" style="margin-top:8px">Tienes ${P.walls.length} muros y ${P.columns.length} columnas: no coincidirán con la foto corregida.</p>` : ''}`,
+    has ? [['Cancelar'], ['Enderezar y mantener muros', '', () => { run(false); }], ['Enderezar y borrar muros', 'primary', () => { run(true); }]]
+      : [['Cancelar'], ['Enderezar', 'primary', () => { run(false); }]]);
+  }
+
+  async function runDetect() {
+    if (!P.floor.image) return;
+    $('#dRun') && ($('#dRun').disabled = true, $('#dRun').textContent = 'Analizando…');
+    await new Promise(r => setTimeout(r, 30));
+    try { detectPrev = await Plan.detectWalls({ sens: det.sens, minLen: det.minLen, minThick: det.minThick / 100 }); }
+    catch (e) { console.error(e); detectPrev = []; toast('No se pudo analizar la imagen', 'crit'); }
+    renderSel(); draw();
   }
 
   function select(h) { sel = h; renderSide(); draw(); }
@@ -850,8 +1069,11 @@ const MapView = (() => {
 
   /* ------------------------------------------------------- panel lateral */
   function setupControls() {
-    $('#toolbar').innerHTML = TOOLS.map(t => t === '-' ? '<hr>' : `<button data-tool="${t[0]}" title="${t[2]}">${ic(t[1])}</button>`).join('');
-    $$('#toolbar button').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+    $('#toolbar').innerHTML = TOOLS.map(t => t === '-' ? '<hr>' : `<button data-tool="${t[0]}" title="${t[2]}">${ic(t[1])}</button>`).join('')
+      + `<hr><button id="tbImg" title="Cargar foto o plano de fondo">${ic('image')}</button><button id="tbHeat" title="Mostrar / ocultar el mapa de calor (Q)">${ic('layers')}</button>`;
+    $$('#toolbar button[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+    $('#tbImg').onclick = () => $('#fileImg').click();
+    $('#tbHeat').onclick = toggleHeat;
     $('#hmMetric').innerHTML = Object.entries(METRICS).map(([k, m]) => `<option value="${k}">${esc(m.name)}</option>`).join('');
     $('#hmProfile').innerHTML = Object.entries(PROFILES).map(([k, p]) => `<option value="${k}">${esc(p.name)}</option>`).join('');
     $('#hmBand').innerHTML = [['all', 'Todas'], ...RF.BANDS.map(b => [b, RF.BAND_LABEL[b]])].map(([k, l]) => `<button data-b="${k}">${l}</button>`).join('');
@@ -884,6 +1106,13 @@ const MapView = (() => {
   function onKey(e) {
     if (!visible() || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) || $('.modal-bg')) return;
     if (e.code === 'Space') { spaceDown = true; e.preventDefault(); return; }
+    if (draft?.kind === 'wall') {                          // longitud tecleada
+      if (/^[0-9]$/.test(e.key) || ((e.key === '.' || e.key === ',') && !typed.includes('.'))) { typed += e.key === ',' ? '.' : e.key; e.preventDefault(); draw(); return; }
+      if (e.key === 'Backspace' && typed) { typed = typed.slice(0, -1); e.preventDefault(); draw(); return; }
+      if (e.key === 'Enter' && typed) { applyTyped(); e.preventDefault(); return; }
+      if (e.key === 'Escape' && typed) { typed = ''; draw(); return; }
+    }
+    if (e.key.toLowerCase() === 'q' && !e.ctrlKey && !e.metaKey) { toggleHeat(); return; }
     if (e.key === 'Escape') { if (draft) finishDraft(); else select(null); return; }
     if (e.key === 'Enter' && draft) { finishDraft(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { removeItem(sel); e.preventDefault(); return; }
@@ -894,15 +1123,20 @@ const MapView = (() => {
 
   function setTool(t) {
     if (draft) finishDraft();
-    tool = t; measure = null;
-    $$('#toolbar button').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    tool = t; measure = null; doorHover = null;
+    $$('#toolbar button[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    $('#tbHeat').classList.toggle('on', !P.heat.hideMap);
+    detectMode = false; detectPrev = null;
     const hints = {
-      select: '<b>Seleccionar:</b> arrastra APs, clientes o muros (extremos al seleccionarlo). Pasa el ratón por el plano para ver la sonda RF.',
+      select: '<b>Seleccionar:</b> arrastra APs, clientes, muros o columnas. Mayús+clic o Mayús+arrastrar para seleccionar varios. Q oculta el mapa de calor.',
       pan: '<b>Desplazar:</b> arrastra para mover el plano. Rueda o pellizco para hacer zoom.',
       ap: `<b>Colocar AP:</b> clic en el plano para instalar un ${apModelSel}.`,
-      wall: `<b>Muro:</b> clic en cada vértice. Doble clic, Enter o Esc para terminar. Alt desactiva el ajuste. Material: ${RF.MATERIALS[wallMat].name}.`,
+      wall: `<b>Muro:</b> clic en cada vértice. Escribe una longitud (p. ej. 3.5) y Enter para un tramo exacto. Doble clic o Esc para terminar. Alt desactiva el ajuste. Material: ${RF.MATERIALS[wallMat].name}.`,
       room: `<b>Sala:</b> arrastra un rectángulo (4 muros de ${RF.MATERIALS[wallMat].name}).`,
       client: `<b>Cliente:</b> clic para añadir un ${RF.CLIENT_TYPES[cliTypeSel].name}.`,
+      column: '<b>Columna/obstáculo:</b> clic para colocar uno del tamaño elegido, o arrastra para dibujarlo a medida.',
+      door: `<b>Puerta/ventana:</b> clic sobre un muro para insertar «${Plan.OPENINGS[open.type].name}» de ${fmt(open.w, 2)} m.`,
+      warp: '<b>Enderezar foto:</b> marca las 4 esquinas del plano en la foto (en cualquier orden).',
       measure: '<b>Medir:</b> arrastra entre dos puntos.',
       calib: '<b>Calibrar:</b> arrastra sobre una distancia conocida del plano (una puerta mide ~0,9 m) e indica su longitud real.',
       walk: '<b>Recorrido:</b> clic para cada punto de la ruta, doble clic o Enter para simular el paseo y el roaming.',
@@ -917,6 +1151,8 @@ const MapView = (() => {
 
   function renderSide() {
     if (!P) return;
+    $('#tbHeat')?.classList.toggle('on', !P.heat.hideMap);
+    $('#legend').classList.toggle('hidden', !!P.heat.hideMap);
     $('#hmMetric').value = P.heat.metric;
     $('#hmProfile').value = P.heat.profile;
     $('#profField').style.display = P.heat.metric === 'req' ? '' : 'none';
@@ -965,42 +1201,185 @@ const MapView = (() => {
   function renderSel() {
     const el = $('#selPanel');
     let h = '';
+    const num = (id, label, val, step = 1, min = 0) => `<div><label class="f">${label}</label><input type="number" id="${id}" step="${step}" min="${min}" value="${val}"></div>`;
+    if (detectMode) { el.innerHTML = detectPanel(); bindDetect(); return; }
     if (tool === 'ap') h += `<h2>Herramienta: colocar AP</h2><div class="field"><label class="f">Modelo</label><select id="tModel">${Object.entries(RF.MODELS).map(([k, m]) => `<option value="${k}" ${k === apModelSel ? 'selected' : ''}>${m.name} — ${esc(m.desc)}</option>`).join('')}</select></div>`;
-    if (tool === 'wall' || tool === 'room') h += `<h2>Herramienta: ${tool === 'wall' ? 'muro' : 'sala'}</h2><div class="field"><label class="f">Material</label><select id="tMat">${matOptions(wallMat)}</select></div><div class="note">${matNote(wallMat)}</div>`;
+    if (tool === 'wall' || tool === 'room') {
+      const m = RF.MATERIALS[wallMat];
+      h += `<h2>Herramienta: ${tool === 'wall' ? 'muro' : 'sala'}</h2><div class="field"><label class="f">Material</label><select id="tMat">${matOptions(wallMat)}</select></div>
+        ${m.fixed ? '' : `<div class="row field">${num('tT', 'Grosor (cm)', Math.round((wallT || m.t) * 100), 1, 2)}</div>`}
+        <div class="note">${matNote(wallMat)}${m.fixed ? '' : ` con ${Math.round(m.t * 100)} cm (escala con el grosor)`}</div>
+        ${tool === 'wall' ? '<div class="note">Calca encima del plano: clic en cada esquina. Para un tramo exacto escribe su longitud (p. ej. <b>3.5</b>) y pulsa <b>Enter</b>.</div>' : ''}`;
+    }
+    if (tool === 'column') h += `<h2>Herramienta: columna u obstáculo</h2>
+      <div class="field"><label class="f">Tipo</label><select id="tColP">${Object.entries(Plan.COLUMN_PRESETS).map(([k, p]) => `<option value="${k}" ${k === col.preset ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="custom" ${col.preset === 'custom' ? 'selected' : ''}>A medida</option></select></div>
+      <div class="field"><div class="seg" id="tColS"><button data-s="rect" class="${col.shape === 'rect' ? 'on' : ''}">Rectangular</button><button data-s="round" class="${col.shape === 'round' ? 'on' : ''}">Redonda</button></div></div>
+      <div class="row field">${num('tColW', 'Ancho (cm)', Math.round(col.w * 100), 5, 5)}${num('tColH', 'Fondo (cm)', Math.round(col.h * 100), 5, 5)}</div>
+      <div class="field"><label class="f">Material</label><select id="tColM">${matOptions(col.mat)}</select></div>
+      <div class="note">Clic para colocar, o arrastra para dibujarla a medida.</div>`;
+    if (tool === 'door') h += `<h2>Herramienta: puerta o ventana</h2>
+      <div class="field"><label class="f">Tipo</label><select id="tOpT">${Object.entries(Plan.OPENINGS).map(([k, o]) => `<option value="${k}" ${k === open.type ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></div>
+      <div class="row field">${num('tOpW', 'Ancho (m)', open.w, 0.05, 0.3)}</div>
+      <div class="note">Clic sobre un muro: se corta el muro y se inserta el hueco con su material.</div>`;
     if (tool === 'client') h += `<h2>Herramienta: cliente</h2><div class="field"><label class="f">Tipo de dispositivo</label><select id="tCli">${Object.entries(RF.CLIENT_TYPES).map(([k, t]) => `<option value="${k}" ${k === cliTypeSel ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`;
     const s = sel;
     if (s?.kind === 'ap') {
       const ap = P.aps.find(a => a.id === s.id);
       if (ap) { el.innerHTML = h + '<div id="mapApEd"></div>'; ApEditor.render($('#mapApEd'), ap, { compact: true }); bindTools(); return; }
     } else if (s?.kind === 'wall' && P.walls[s.i]) {
-      const w = P.walls[s.i];
-      h += `<h2>Muro <span class="actions"><button class="btn sm danger" id="wDel">${ic('trash')}Borrar</button></span></h2>
+      const w = P.walls[s.i], m = RF.MATERIALS[w.mat], len = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+      h += `<h2>${w.opening ? esc(Plan.OPENINGS[w.opening]?.name || 'Hueco') : 'Muro'} <span class="actions"><button class="btn sm danger" id="wDel">${ic('trash')}Borrar</button></span></h2>
         <div class="field"><label class="f">Material</label><select id="wMat">${matOptions(w.mat)}</select></div>
-        <div class="note">${matNote(w.mat)}<br>Longitud ${fmt(Math.hypot(w.x2 - w.x1, w.y2 - w.y1), 2)} m · arrastra sus extremos para editarlo.</div>`;
+        ${m.fixed ? '' : `<div class="row field">${num('wT', 'Grosor (cm)', Math.round((w.t || m.t) * 100), 1, 2)}</div>`}
+        <div class="note" style="margin-bottom:10px">${matNote(w.mat)} · atenuación con este grosor: ${fmt(RF.wallLoss(w, '5'), 1)} dB a 5 GHz</div>
+        <div class="row field"><div><label class="f">Longitud actual</label><input type="text" value="${fmt(len, 2)} m" disabled></div>${num('wLen', 'Longitud real (m)', len.toFixed(2), 0.01, 0.05)}</div>
+        <div class="row" style="margin-bottom:8px"><button class="btn sm" id="wSetLen">Ajustar este muro</button><button class="btn sm primary" id="wScale">${ic('scale')}Reescalar todo</button></div>
+        <div class="note">«Reescalar todo» toma este muro como referencia: si mide ${fmt(len, 2)} m y en realidad mide más o menos, todo el plano (muros, columnas, APs) se ajusta a la escala real.<br>Arrastra sus extremos para moverlos · Mayús+clic para seleccionar varios.</div>`;
+    } else if (s?.kind === 'multi') {
+      const ws = [...s.walls].map(i => P.walls[i]).filter(Boolean);
+      h += `<h2>${ws.length} muro(s) y ${s.cols.size} columna(s) <span class="actions"><button class="btn sm danger" id="mDel">${ic('trash')}Borrar</button></span></h2>
+        <div class="field"><label class="f">Cambiar material</label><select id="mMat"><option value="">— elige —</option>${matOptions('')}</select></div>
+        <div class="row field">${num('mT', 'Grosor (cm)', '', 1, 2)}<div style="display:flex;align-items:flex-end"><button class="btn sm" id="mTApply">Aplicar grosor</button></div></div>
+        <div class="note">Mayús+clic añade o quita elementos; Mayús+arrastrar selecciona por área.</div>`;
+    } else if (s?.kind === 'column') {
+      const co = P.columns.find(c => c.id === s.id);
+      if (co) h += `<h2>Columna / obstáculo <span class="actions"><button class="btn sm" id="cDup" title="Duplicar">${ic('copy')}</button><button class="btn sm danger" id="cDel2">${ic('trash')}</button></span></h2>
+        <div class="field"><div class="seg" id="cShape"><button data-s="rect" class="${co.shape === 'rect' ? 'on' : ''}">Rectangular</button><button data-s="round" class="${co.shape === 'round' ? 'on' : ''}">Redonda</button></div></div>
+        <div class="row field">${num('cW', 'Ancho (cm)', Math.round(co.w * 100), 5, 5)}${num('cH', 'Fondo (cm)', Math.round(co.h * 100), 5, 5)}</div>
+        <div class="field"><label class="f">Material</label><select id="cMat">${matOptions(co.mat)}</select></div>
+        <div class="note">Atenuación al atravesarla: ~${fmt(Plan.columnSegments(co).reduce((a, x) => Math.max(a, RF.wallLoss(x, '5')), 0) * 2, 1)} dB a 5 GHz.</div>`;
     } else if (s?.kind === 'client') {
       const cl = P.clients.find(c => c.id === s.id);
       if (cl) h += clientCard(cl);
-    } else if (!h) {
-      h = `<h2>Plano</h2><div class="note" style="margin-top:0">${fmt(P.floor.w, 1)} × ${fmt(P.floor.h, 1)} m · ${P.walls.length} muros · ${P.aps.length} APs · ${P.clients.length} clientes<br>
-        Selecciona un AP para cambiar su potencia, canales y anchos. Cambia el plano o sus dimensiones en <a data-go="project">Proyecto y plano</a>.</div>
-        <div class="row" style="margin-top:10px"><button class="btn sm" id="exPng">${ic('download')}Exportar PNG</button><button class="btn sm" id="optRf">${ic('zap')}Optimizar RF</button></div>`;
-    }
+    } else if (!h) h = floorPanel();
     el.innerHTML = h;
     bindTools();
-    if (s?.kind === 'wall') {
-      $('#wMat').onchange = e => { P.walls[s.i].mat = e.target.value; geometryChanged(); renderSel(); };
+    const geo = () => { geometryChanged(); renderSel(); };
+    if (s?.kind === 'wall' && P.walls[s.i]) {
+      const w = P.walls[s.i];
+      $('#wMat').onchange = e => { w.mat = e.target.value; if (RF.MATERIALS[w.mat].fixed) delete w.t; geo(); };
+      $('#wT') && ($('#wT').onchange = e => { const v = parseFloat(e.target.value); if (v > 0) { w.t = v / 100; geo(); } });
       $('#wDel').onclick = () => removeItem(s);
+      $('#wSetLen').onclick = () => setWallLength(s.i, parseFloat($('#wLen').value));
+      $('#wScale').onclick = () => {
+        const L = parseFloat($('#wLen').value), cur = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+        if (!(L > 0) || !cur) return;
+        rescale(L / cur);
+        logEvent('ok', 'Plano', `Escala ajustada con un muro de ${fmt(L, 2)} m: plano de ${fmt(P.floor.w, 2)} × ${fmt(P.floor.h, 2)} m`);
+        toast(`Escala aplicada: el plano mide ahora ${fmt(P.floor.w, 2)} × ${fmt(P.floor.h, 2)} m`, 'ok');
+      };
+    }
+    if (s?.kind === 'multi') {
+      const ws = () => [...s.walls].map(i => P.walls[i]).filter(Boolean);
+      $('#mMat').onchange = e => {
+        const k = e.target.value; if (!k) return;
+        ws().forEach(w => { w.mat = k; if (RF.MATERIALS[k].fixed) delete w.t; });
+        P.columns.forEach(c => { if (s.cols.has(c.id)) c.mat = k; });
+        geo();
+      };
+      $('#mTApply').onclick = () => { const v = parseFloat($('#mT').value); if (v > 0) { ws().forEach(w => { if (!RF.MATERIALS[w.mat].fixed) w.t = v / 100; }); geo(); } };
+      $('#mDel').onclick = () => removeItem(s);
+    }
+    if (s?.kind === 'column') {
+      const co = P.columns.find(c => c.id === s.id);
+      if (co) {
+        $$('#cShape button').forEach(b => b.onclick = () => { co.shape = b.dataset.s; geo(); });
+        $('#cW').onchange = e => { const v = parseFloat(e.target.value); if (v > 0) { co.w = v / 100; geo(); } };
+        $('#cH').onchange = e => { const v = parseFloat(e.target.value); if (v > 0) { co.h = v / 100; geo(); } };
+        $('#cMat').onchange = e => { co.mat = e.target.value; geo(); };
+        $('#cDel2').onclick = () => removeItem(s);
+        $('#cDup').onclick = () => { const n = { ...co, id: uid('co'), x: Math.min(co.x + co.w + 0.5, P.floor.w) }; P.columns.push(n); sel = { kind: 'column', id: n.id }; geo(); };
+      }
     }
     if (s?.kind === 'client') bindClientCard(P.clients.find(c => c.id === s.id));
-    $('#exPng') && ($('#exPng').onclick = exportPng);
-    $('#optRf') && ($('#optRf').onclick = () => UI.optimize());
+    if (!s && !tool.match(/^(ap|wall|room|column|door|client)$/)) bindFloor();
     $$('[data-go]', el).forEach(a => a.onclick = () => UI.go(a.dataset.go));
+  }
+
+  function floorPanel() {
+    const f = P.floor, has = !!f.image;
+    return `<h2>Plano de fondo</h2>
+      <div class="row field"><button class="btn sm ${has ? '' : 'primary'}" id="fpLoad">${ic('image')}${has ? 'Cambiar foto' : 'Cargar foto o plano'}</button>${has ? `<button class="btn sm danger" id="fpDel">${ic('trash')}Quitar</button>` : ''}</div>
+      ${has ? `<div class="row field"><button class="btn sm" id="fpWarp">${ic('crop')}Enderezar (4 esquinas)</button><button class="btn sm" id="fpRot">${ic('rotate')}Girar 90°</button></div>` : ''}
+      <div class="row field"><button class="btn sm" id="fpCal">${ic('scale')}Calibrar escala</button>${has ? `<button class="btn sm" id="fpDet">${ic('magic')}Detectar paredes</button>` : ''}</div>
+      ${has ? `<div class="field"><label class="f">Opacidad de la foto <output class="mono">${Math.round(f.imgOpacity * 100)} %</output></label><input type="range" id="fpOp" min="10" max="100" value="${Math.round(f.imgOpacity * 100)}"></div>` : ''}
+      <label class="chk"><input type="checkbox" id="fpHide" ${P.heat.hideMap ? 'checked' : ''}> Ocultar mapa de calor para calcar (Q)</label>
+      <label class="chk"><input type="checkbox" id="fpDims" ${f.showDims ? 'checked' : ''}> Mostrar medidas de los muros</label>
+      <label class="chk"><input type="checkbox" id="fpGrid" ${f.showGrid ? 'checked' : ''}> Cuadrícula de metros</label>
+      <div class="note">${fmt(f.w, 2)} × ${fmt(f.h, 2)} m · ${P.walls.length} muros · ${P.columns.length} columnas · ${P.aps.length} APs<br>
+        Pasos: 1) carga la foto, 2) enderézala si está torcida, 3) calibra con una medida conocida, 4) calca los muros (o detéctalos) y elige su material.</div>
+      <div class="row" style="margin-top:10px"><button class="btn sm" id="fpAll">Seleccionar muros</button><button class="btn sm" id="exPng">${ic('download')}PNG</button></div>`;
+  }
+
+  function bindFloor() {
+    const f = P.floor, on = (id, ev, fn) => { const e = $(id); if (e) e[ev] = fn; };
+    on('#fpLoad', 'onclick', () => $('#fileImg').click());
+    on('#fpDel', 'onclick', () => Modal.confirm('Quitar foto', 'Se quitará la foto de fondo (los muros se mantienen).', 'Quitar', () => { f.image = null; f.imgW = f.imgH = 0; save(); UI.refresh(); }));
+    on('#fpWarp', 'onclick', () => { setTool('warp'); toast('Marca las 4 esquinas del plano en la foto', 'info'); });
+    on('#fpRot', 'onclick', async () => { await Plan.rotate(); Heat.invalidate(); heatDirty = true; fitted = false; save(); UI.refresh(); fit(); });
+    on('#fpCal', 'onclick', () => setTool('calib'));
+    on('#fpDet', 'onclick', () => { detectMode = true; detectPrev = null; renderSel(); runDetect(); });
+    on('#fpOp', 'oninput', e => { f.imgOpacity = +e.target.value / 100; e.target.previousElementSibling.querySelector('output').textContent = `${e.target.value} %`; save(); draw(); });
+    on('#fpHide', 'onchange', () => toggleHeat());
+    on('#fpDims', 'onchange', e => { f.showDims = e.target.checked; save(); draw(); });
+    on('#fpGrid', 'onchange', e => { f.showGrid = e.target.checked; save(); draw(); });
+    on('#fpAll', 'onclick', () => select(P.walls.length ? { kind: 'multi', walls: new Set(P.walls.map((w, i) => i)), cols: new Set(P.columns.map(c => c.id)) } : null));
+    on('#exPng', 'onclick', exportPng);
+  }
+
+  function detectPanel() {
+    return `<h2>Detectar paredes ${ic('magic').replace('<svg', '<svg style="width:15px;height:15px"')}</h2>
+      <div class="field"><label class="f">Sensibilidad <output class="mono">${Math.round(det.sens * 100)} %</output></label><input type="range" id="dSens" min="8" max="50" value="${Math.round(det.sens * 100)}"></div>
+      <div class="row field"><div><label class="f">Long. mínima (m)</label><input type="number" id="dLen" step="0.1" min="0.2" value="${det.minLen}"></div>
+        <div><label class="f">Grosor mín. (cm)</label><input type="number" id="dThick" step="1" min="1" value="${det.minThick}"></div></div>
+      <label class="chk"><input type="checkbox" id="dRep" ${det.replace ? 'checked' : ''}> Sustituir los muros actuales</label>
+      <div class="row field"><button class="btn sm" id="dRun">${ic('refresh')}Analizar</button></div>
+      <div class="note" style="margin-bottom:10px">${detectPrev ? `<b style="color:#f9a8d4">${detectPrev.length} paredes detectadas</b> (en rosa sobre el plano). El material se elige por el grosor: gruesas = hormigón, medias = ladrillo, finas = pladur.` : 'Analizando la imagen…'}</div>
+      <div class="row"><button class="btn sm" id="dCancel">Cancelar</button><button class="btn sm primary" id="dApply" ${detectPrev?.length ? '' : 'disabled'}>Añadir al plano</button></div>
+      <div class="note" style="margin-top:10px">Funciona mejor con planos limpios (líneas oscuras sobre fondo claro) y detecta paredes horizontales y verticales. Revisa el resultado: borra lo que sobre y calca a mano lo que falte. Calibra la escala antes, porque el grosor se mide en metros.</div>`;
+  }
+
+  function bindDetect() {
+    $('#dSens').oninput = e => { det.sens = +e.target.value / 100; e.target.previousElementSibling.querySelector('output').textContent = `${e.target.value} %`; };
+    $('#dSens').onchange = runDetect;
+    $('#dLen').onchange = e => { det.minLen = Math.max(0.2, +e.target.value || 0.8); runDetect(); };
+    $('#dThick').onchange = e => { det.minThick = Math.max(1, +e.target.value || 5); runDetect(); };
+    $('#dRep').onchange = e => { det.replace = e.target.checked; };
+    $('#dRun').onclick = runDetect;
+    $('#dCancel').onclick = () => { detectMode = false; detectPrev = null; renderSel(); draw(); };
+    $('#dApply').onclick = () => {
+      if (det.replace) P.walls = [];
+      P.walls.push(...detectPrev);
+      logEvent('ok', 'Plano', `${detectPrev.length} paredes añadidas por detección automática`);
+      toast(`${detectPrev.length} paredes añadidas. Revisa y ajusta los materiales.`, 'ok');
+      detectMode = false; detectPrev = null; sel = null;
+      P.floor.showDims = true;
+      geometryChanged();
+    };
+  }
+
+  function toggleHeat() {
+    P.heat.hideMap = !P.heat.hideMap;
+    save(); renderSide(); draw();
+    toast(P.heat.hideMap ? 'Modo calco: mapa de calor oculto (Q para verlo)' : 'Mapa de calor visible', 'info');
   }
 
   function bindTools() {
     $('#tModel') && ($('#tModel').onchange = e => { apModelSel = e.target.value; setTool('ap'); });
-    $('#tMat') && ($('#tMat').onchange = e => { wallMat = e.target.value; setTool(tool); });
+    $('#tMat') && ($('#tMat').onchange = e => { wallMat = e.target.value; wallT = null; setTool(tool); });
+    $('#tT') && ($('#tT').onchange = e => { const v = parseFloat(e.target.value); wallT = v > 0 ? v / 100 : null; });
     $('#tCli') && ($('#tCli').onchange = e => { cliTypeSel = e.target.value; setTool('client'); });
+    if ($('#tColP')) {
+      $('#tColP').onchange = e => { col.preset = e.target.value; const p = Plan.COLUMN_PRESETS[col.preset]; if (p) Object.assign(col, { shape: p.shape, w: p.w, h: p.h, mat: p.mat }); renderSel(); };
+      $$('#tColS button').forEach(b => b.onclick = () => { col.shape = b.dataset.s; col.preset = 'custom'; renderSel(); });
+      $('#tColW').onchange = e => { col.w = Math.max(0.05, +e.target.value / 100 || 0.4); col.preset = 'custom'; };
+      $('#tColH').onchange = e => { col.h = Math.max(0.05, +e.target.value / 100 || 0.4); col.preset = 'custom'; };
+      $('#tColM').onchange = e => { col.mat = e.target.value; };
+    }
+    if ($('#tOpT')) {
+      $('#tOpT').onchange = e => { open.type = e.target.value; open.w = Plan.OPENINGS[open.type].w; setTool('door'); };
+      $('#tOpW').onchange = e => { open.w = clamp(+e.target.value || 0.9, 0.3, 6); setTool('door'); };
+    }
   }
 
   const matOptions = cur => Object.entries(RF.MATERIALS).map(([k, m]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
@@ -1055,12 +1434,20 @@ const MapView = (() => {
       if (sel?.kind === 'ap' && !P.aps.some(a => a.id === sel.id)) sel = null;
       if (sel?.kind === 'client' && !P.clients.some(c => c.id === sel.id)) sel = null;
       if (sel?.kind === 'wall' && !P.walls[sel.i]) sel = null;
+      if (sel?.kind === 'column' && !P.columns.some(c => c.id === sel.id)) sel = null;
+      if (sel?.kind === 'multi') {
+        for (const i of [...sel.walls]) if (!P.walls[i]) sel.walls.delete(i);
+        for (const id of [...sel.cols]) if (!P.columns.some(c => c.id === id)) sel.cols.delete(id);
+        if (!sel.walls.size && !sel.cols.size) sel = null;
+      }
       if (P.walk && !walk) computeWalk(); else renderWalk();
       renderSide();
       if (visible()) { if (!fitted) resize(); else draw(); }
     },
     shown() { resize(); if (!fitted) fit(); },
     fit, select, setTool, rescale, exportPng, centerOn,
+    openDetect() { UI.go('map'); setTool('select'); detectMode = true; detectPrev = null; renderSel(); runDetect(); },
+    toggleHeat,
     focusAp(id) { const ap = P.aps.find(a => a.id === id); select({ kind: 'ap', id }); centerOn(ap); },
     focusClient(id) { const c = P.clients.find(a => a.id === id); select({ kind: 'client', id }); centerOn(c); },
     locate(id) { blink = { id, until: Date.now() + 4000 }; draw(); },

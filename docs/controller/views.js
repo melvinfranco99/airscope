@@ -541,7 +541,7 @@ const Clients = {
       const d = 0.4 + Math.random() * 0.8;
       let nx = c.x + Math.cos(c.dir) * d, ny = c.y + Math.sin(c.dir) * d;
       const blocked = nx < 0.3 || ny < 0.3 || nx > P.floor.w - 0.3 || ny > P.floor.h - 0.3 ||
-        P.walls.some(w => RF.segX(c.x, c.y, nx, ny, w.x1, w.y1, w.x2, w.y2) && w.mat !== 'wood');
+        rfWalls().some(w => RF.segX(c.x, c.y, nx, ny, w.x1, w.y1, w.x2, w.y2) && w.mat !== 'wood' && w.mat !== 'glass');
       if (blocked) { c.dir += Math.PI * (0.6 + Math.random() * 0.8); continue; }
       c.x = nx; c.y = ny; associate(c); any = true;
     }
@@ -644,11 +644,28 @@ const Project = {
         const ratio = c.height / c.width;
         P.floor.h = +(P.floor.w * ratio).toFixed(2);
         Heat.invalidate(); MapView.refit();
-        logEvent('ok', 'Plano', `Plano cargado (${file.name}). Ajusta las dimensiones o calibra la escala.`);
-        save(); UI.refresh();
-        Modal.open('Plano cargado', `<p>Se ha ajustado el fondo a <b>${fmt(P.floor.w, 1)} × ${fmt(P.floor.h, 1)} m</b> manteniendo la proporción de la imagen.</p>
-          <p class="dim" style="margin-top:8px">Indica las dimensiones reales o calibra la escala marcando una distancia conocida (una puerta, un pilar, una cota del plano).</p>`,
-        [['Más tarde'], ['Calibrar ahora', 'primary', () => { UI.go('map'); MapView.setTool('calib'); }]]);
+        logEvent('ok', 'Plano', `Foto del plano cargada (${file.name})`);
+        P.heat.hideMap = true;                                       // modo calco
+        save(); UI.go('map'); UI.refresh();
+        const hasWalls = P.walls.length + P.columns.length, hasAps = P.aps.length + P.clients.length;
+        const apply = () => {
+          if ($('#liWalls')?.checked) { P.walls = []; P.columns = []; P.walk = null; }
+          if ($('#liAps')?.checked) { P.aps = []; P.clients = []; view.hidden.clear(); view.source = 'all'; }
+          const w = parseFloat($('#liW').value);
+          if (w > 0) { P.floor.w = w; P.floor.h = +(w * P.floor.imgH / P.floor.imgW).toFixed(2); }
+          Heat.invalidate(); MapView.refit(); associateAll(false); save(); UI.refresh(); MapView.fit();
+        };
+        Modal.open('Foto del plano cargada', `
+          <p>La foto está de fondo y el mapa de calor oculto para que puedas calcar encima (tecla <b>Q</b> para verlo).</p>
+          <div class="field" style="margin-top:12px"><label class="f">Ancho real del plano en metros (opcional; si no lo sabes, calibra luego con una medida)</label>
+            <input type="number" id="liW" step="0.1" min="1" placeholder="${fmt(P.floor.w, 1)}"></div>
+          ${hasWalls ? `<label class="chk"><input type="checkbox" id="liWalls" checked> Borrar los ${P.walls.length} muros y ${P.columns.length} columnas anteriores</label>` : ''}
+          ${hasAps ? `<label class="chk"><input type="checkbox" id="liAps"> Borrar también los ${P.aps.length} APs y ${P.clients.length} clientes</label>` : ''}
+          <p class="dim" style="margin-top:8px">Siguiente paso:</p>`,
+        [['Calcar a mano', '', () => { apply(); MapView.setTool('wall'); }],
+         ['Detectar paredes', '', () => { apply(); MapView.openDetect(); }],
+         ['Enderezar foto', '', () => { apply(); MapView.setTool('warp'); toast('Marca las 4 esquinas del plano en la foto', 'info'); }],
+         ['Calibrar escala', 'primary', () => { apply(); MapView.setTool('calib'); }]]);
       };
       im.onerror = () => toast('No se pudo leer la imagen', 'crit');
       im.src = rd.result;

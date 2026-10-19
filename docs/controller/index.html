@@ -65,6 +65,8 @@
         <div class="probe hidden" id="probe"></div>
       </div>
       <aside class="side-panel" id="sidePanel">
+        <div class="panel" id="selPanel"></div>
+        <div class="panel hidden" id="walkPanel"></div>
         <div class="panel">
           <h2>Mapa de calor</h2>
           <div class="field"><label class="f">Métrica</label><select id="hmMetric"></select></div>
@@ -85,8 +87,6 @@
           <h2>Puntos de acceso <span class="actions"><button class="btn sm" id="allOn">Todos</button></span></h2>
           <div class="ap-list" id="apList"></div>
         </div>
-        <div class="panel" id="selPanel"></div>
-        <div class="panel hidden" id="walkPanel"></div>
       </aside>
     </section>
 
@@ -150,6 +150,7 @@
 <input type="file" id="fileJson" accept=".json,application/json" class="hidden">
 <script src="rf.js"></script>
 <script src="core.js"></script>
+<script src="plan.js"></script>
 <script src="map.js"></script>
 <script src="views.js"></script>
 </body>

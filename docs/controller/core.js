@@ -49,6 +49,12 @@ const ICONS = {
   stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
   radar: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12 18.5 5.5"/>',
   edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  pillar: '<rect x="8" y="3" width="8" height="18" rx="1"/><path d="M5 3h14M5 21h14"/>',
+  door: '<path d="M3 21h18M6 21V4h9v17"/><path d="m15 4 4 2v15"/><circle cx="12.5" cy="12.5" r=".6"/>',
+  layers: '<path d="m12 2 10 6-10 6L2 8z"/><path d="m2 16 10 6 10-6"/>',
+  magic: '<path d="m14 6 4 4L8 20H4v-4z"/><path d="M19 2v4M17 4h4"/>',
+  crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+  rotate: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   locate: '<circle cx="12" cy="10" r="3"/><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/>',
 };
 const ic = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
@@ -111,9 +117,9 @@ function defaultRrm() {
 function newProject(name = 'Proyecto nuevo', w = 30, h = 20) {
   return {
     v: 1, name, country: 'ES',
-    floor: { w, h, image: null, imgW: 0, imgH: 0, imgOpacity: 0.85, showGrid: true },
+    floor: { w, h, image: null, imgW: 0, imgH: 0, imgOpacity: 0.85, showGrid: true, showDims: false },
     env: defaultEnv(), rrm: defaultRrm(), matLoss: {},
-    walls: [], aps: [], clients: [], wlans: [], events: [], walk: null,
+    walls: [], columns: [], aps: [], clients: [], wlans: [], events: [], walk: null,
     heat: { metric: 'rssi', band: 'all', cutoff: -88, opacity: 85, profile: 'data', contours: false, links: false,
       outside: true, borders: true, overlap: true, conflict: true, v2: true },
   };
@@ -213,6 +219,7 @@ function loadProject(obj) {
     rrm: { ...base.rrm, ...obj.rrm, tpc: { ...base.rrm.tpc, ...(obj.rrm?.tpc || {}) } }, heat: { ...base.heat, ...obj.heat } };
   if (!obj.heat?.v2) Object.assign(P.heat, { opacity: 85, contours: false, v2: true });   // estilo de mapa nuevo
   P.walls = (P.walls || []).filter(w => RF.MATERIALS[w.mat]);
+  P.columns = (P.columns || []).filter(c => RF.MATERIALS[c.mat]);
   P.aps = (P.aps || []).filter(a => RF.MODELS[a.model]);
   P.aps.forEach(a => { if (a.status !== 'up') a.status = 'up'; setModel(a, a.model); });
   view.hidden.clear(); view.source = 'all';
@@ -242,7 +249,7 @@ function set24() {
 function runDca(band, { force = false, log = true } = {}) {
   const list = radioItems(band).map(it => ({ ...it, fixed: !force && it.radio.chMode !== 'auto' }));
   if (!list.length) return 0;
-  const res = RF.dca(list, P.walls, P.env, band,
+  const res = RF.dca(list, rfWalls(), P.env, band,
     { country: P.country, set24: set24(), avoidDfs: P.rrm.avoidDfs, psc: P.rrm.psc, blocked: P.rrm.nol });
   let changes = 0;
   list.forEach((it, i) => {
@@ -260,7 +267,7 @@ function runTpc(band, { log = true } = {}) {
   const items = radioItems(band);
   if (!items.length) return 0;
   const cfg = P.rrm.tpc[band];
-  const res = RF.tpc(items, P.walls, P.env, band, { minTx: cfg.min, maxTx: cfg.max, threshold: cfg.threshold, neighbors: P.rrm.neighbors });
+  const res = RF.tpc(items, rfWalls(), P.env, band, { minTx: cfg.min, maxTx: cfg.max, threshold: cfg.threshold, neighbors: P.rrm.neighbors });
   let changes = 0;
   items.forEach((it, i) => {
     if (it.radio.txMode !== 'auto') return;
@@ -294,7 +301,7 @@ function autoRrm(reason) {
 /** Mejor canal para una sola radio dejando el resto fijo (p. ej. tras radar). */
 function bestChannelFor(ap, band) {
   const list = radioItems(band).map(it => ({ ...it, fixed: it.ap !== ap }));
-  const res = RF.dca(list, P.walls, P.env, band,
+  const res = RF.dca(list, rfWalls(), P.env, band,
     { country: P.country, set24: set24(), avoidDfs: true, psc: P.rrm.psc, blocked: P.rrm.nol });
   const i = list.findIndex(it => it.ap === ap);
   return i >= 0 ? res[i] : ap.radios[band].ch;
@@ -328,7 +335,7 @@ function clientWlan(cl) { return P.wlans.find(w => w.id === cl.wlan && w.on); }
 
 function linkFor(cl, ap, band) {
   const m = RF.MODELS[ap.model], r = ap.radios[band], ct = RF.CLIENT_TYPES[cl.type];
-  const pl = RF.pathLoss(P.walls, band, P.env.ple[band], ap.x, ap.y, ap.h, cl.x, cl.y, P.env.clientHeight);
+  const pl = RF.pathLoss(rfWalls(), band, P.env.ple[band], ap.x, ap.y, ap.h, cl.x, cl.y, P.env.clientHeight);
   const pg = RF.patternGain(m, band, ap.azimuth || 0, Math.atan2(cl.y - ap.y, cl.x - ap.x));
   const rssi = r.tx + m.gain[band] + pg + ct.gain - pl;
   const ul = ct.tx[band] + ct.gain + m.gain[band] + pg - pl;
@@ -341,7 +348,7 @@ function linkFor(cl, ap, band) {
     const or = o.radios[band];
     if (!or || !or.on) continue;
     const ov = RF.overlap(sp, RF.span(band, or.ch, or.width));
-    if (ov > 0) I += RF.dbmToMw(RF.rssiAt(o, RF.MODELS[o.model], band, or, P.walls, P.env, cl.x, cl.y, P.env.clientHeight, ct.gain)) * ov;
+    if (ov > 0) I += RF.dbmToMw(RF.rssiAt(o, RF.MODELS[o.model], band, or, rfWalls(), P.env, cl.x, cl.y, P.env.clientHeight, ct.gain)) * ov;
   }
   const snr = rssi - nf;
   const sinr = rssi - RF.mwToDbm(RF.dbmToMw(nf) + I);
@@ -432,7 +439,7 @@ function utilization() {
       if (i === j || o.band !== it.band) return;
       const ov = RF.overlap(sp, RF.span(o.band, o.radio.ch, o.radio.width));
       if (!ov) return;
-      const heard = RF.rssiAt(o.ap, o.model, o.band, o.radio, P.walls, P.env, it.ap.x, it.ap.y, it.ap.h, it.model.gain[it.band]);
+      const heard = RF.rssiAt(o.ap, o.model, o.band, o.radio, rfWalls(), P.env, it.ap.x, it.ap.y, it.ap.h, it.model.gain[it.band]);
       if (heard >= -82) u += own[j] * ov;
     });
     out[`${it.ap.id}|${it.band}`] = clamp(u, 0, 100);
@@ -449,7 +456,7 @@ function neighbors(ap) {
     for (const b of m.bands) {
       const or = o.radios[b];
       if (!or?.on) continue;
-      const rssi = RF.rssiAt(o, RF.MODELS[o.model], b, or, P.walls, P.env, ap.x, ap.y, ap.h, m.gain[b]);
+      const rssi = RF.rssiAt(o, RF.MODELS[o.model], b, or, rfWalls(), P.env, ap.x, ap.y, ap.h, m.gain[b]);
       if (rssi < -90) continue;
       const mine = ap.radios[b];
       const ov = mine?.on ? RF.overlap(RF.span(b, mine.ch, mine.width), RF.span(b, or.ch, or.width)) : 0;
@@ -457,6 +464,18 @@ function neighbors(ap) {
     }
   }
   return out.sort((a, b) => b.rssi - a.rssi);
+}
+
+/* =============================================== obstáculos para la RF */
+let rfCache = { ver: -1, list: [] };
+/** Muros + caras de columnas, con su factor de atenuación por grosor. */
+function rfWalls() {
+  if (rfCache.ver !== Heat.geoVer || rfCache.n !== P.walls.length + P.columns.length) {
+    const list = P.walls.map(w => ({ x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2, mat: w.mat, k: RF.thickK(w) }));
+    for (const c of P.columns) list.push(...Plan.columnSegments(c));
+    rfCache = { ver: Heat.geoVer, n: P.walls.length + P.columns.length, list };
+  }
+  return rfCache.list;
 }
 
 /* ============================================================ mapas de calor */
@@ -484,7 +503,7 @@ const Heat = {
     const ck = `${ap.id}|${g.key}`;
     let e = this.cache.get(ck);
     if (!e || e.k !== k) {
-      e = { k, m: RF.lossMap(ap, RF.MODELS[ap.model], P.walls, P.env, g) };
+      e = { k, m: RF.lossMap(ap, RF.MODELS[ap.model], rfWalls(), P.env, g) };
       this.cache.set(ck, e);
     }
     return e.m;
@@ -619,7 +638,7 @@ const Heat = {
 
   probe(x, y, { band, source, hidden, profile }) {
     const S = this.setup(band, source, hidden, false);
-    const rs = S.all.map(it => RF.rssiAt(it.ap, it.m, it.b, it.r, P.walls, P.env, x, y));
+    const rs = S.all.map(it => RF.rssiAt(it.ap, it.m, it.b, it.r, rfWalls(), P.env, x, y));
     return { S, rs, e: this.evalPoint(rs, S, profile) };
   },
 };
@@ -639,7 +658,7 @@ function analyze(stats) {
       const ov = Math.max(RF.overlap(RF.span(b, a.radio.ch, a.radio.width), RF.span(b, c.radio.ch, c.radio.width)),
         RF.overlap(RF.span(b, c.radio.ch, c.radio.width), RF.span(b, a.radio.ch, a.radio.width)));
       if (!ov) continue;
-      const heard = RF.rssiAt(a.ap, a.model, b, a.radio, P.walls, P.env, c.ap.x, c.ap.y, c.ap.h, c.model.gain[b]);
+      const heard = RF.rssiAt(a.ap, a.model, b, a.radio, rfWalls(), P.env, c.ap.x, c.ap.y, c.ap.h, c.model.gain[b]);
       if (heard < -78) continue;
       const same = a.radio.ch === c.radio.ch && a.radio.width === c.radio.width;
       add(heard > -65 ? 'crit' : 'warn', `${a.ap.name} y ${c.ap.name} ${same ? 'comparten' : 'solapan'} canal en ${RF.BAND_LABEL[b]} (${a.radio.ch}/${a.radio.width} y ${c.radio.ch}/${c.radio.width}) y se oyen a ${fdbm(heard)}`);
@@ -699,6 +718,8 @@ function demoProject() {
   W(0, 16, 4, 16, 'brick'); W(5.2, 16, 7, 16, 'brick'); W(7, 16, 7, 22, 'brick'); W(4, 16, 5.2, 16, 'wood');
   // estanterías de archivo
   W(9, 13, 9, 19, 'shelf'); W(11, 13, 11, 19, 'shelf');
+  // pilares de la estructura
+  for (const x of [8, 24]) for (const y of [8, 15]) P.columns.push({ id: uid('co'), shape: 'rect', x, y, w: 0.4, h: 0.4, mat: 'concrete' });
   P.wlans = [
     { id: uid('wl'), ssid: 'AirScope-Corp', on: true, sec: 'wpa3ent', bands: ['2.4', '5', '6'], vlan: 10, hidden: false, ft: true, k: true, v: true, isolation: false, minRate: 12, limit: 0 },
     { id: uid('wl'), ssid: 'AirScope-Invitados', on: true, sec: 'wpa23', bands: ['2.4', '5'], vlan: 50, hidden: false, ft: false, k: true, v: true, isolation: true, minRate: 12, limit: 20 },
