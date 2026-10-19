@@ -106,7 +106,7 @@ const RF = (() => {
 
   /* ------------------------------------------------------------ materiales */
   const MATERIALS = {
-    drywall:  { name: 'Pladur / tabique',        loss: { '2.4': 3,  '5': 4,  '6': 5  }, color: '#94a3b8', w: 2 },
+    drywall:  { name: 'Pladur / tabique',        loss: { '2.4': 3,  '5': 4,  '6': 5  }, color: '#dbeafe', w: 2 },
     brick:    { name: 'Ladrillo',                loss: { '2.4': 6,  '5': 10, '6': 12 }, color: '#f97316', w: 3 },
     concrete: { name: 'Hormigón',                loss: { '2.4': 12, '5': 17, '6': 20 }, color: '#a8a29e', w: 4 },
     heavy:    { name: 'Muro de carga (armado)',  loss: { '2.4': 18, '5': 25, '6': 30 }, color: '#e7e5e4', w: 5 },
@@ -205,6 +205,7 @@ const RF = (() => {
    */
   function lossMap(ap, model, walls, env, grid) {
     const { cols, rows, res } = grid;
+    const x0 = grid.x0 || 0, y0 = grid.y0 || 0;
     const n = cols * rows;
     const out = {};
     const bands = model.bands;
@@ -222,9 +223,9 @@ const RF = (() => {
     const ax = ap.x, ay = ap.y;
     const acc = new Float64Array(bands.length);
     for (let r = 0; r < rows; r++) {
-      const y = (r + 0.5) * res;
+      const y = y0 + (r + 0.5) * res;
       for (let c = 0; c < cols; c++) {
-        const x = (c + 0.5) * res;
+        const x = x0 + (c + 0.5) * res;
         acc.fill(0);
         for (let i = 0; i < W; i++) {
           // test de cruce de segmentos (inline por rendimiento)

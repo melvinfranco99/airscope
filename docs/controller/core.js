@@ -114,7 +114,8 @@ function newProject(name = 'Proyecto nuevo', w = 30, h = 20) {
     floor: { w, h, image: null, imgW: 0, imgH: 0, imgOpacity: 0.85, showGrid: true },
     env: defaultEnv(), rrm: defaultRrm(), matLoss: {},
     walls: [], aps: [], clients: [], wlans: [], events: [], walk: null,
-    heat: { metric: 'rssi', band: 'all', cutoff: -88, opacity: 70, profile: 'data', contours: true, links: false },
+    heat: { metric: 'rssi', band: 'all', cutoff: -88, opacity: 85, profile: 'data', contours: false, links: false,
+      outside: true, borders: true, overlap: true, conflict: true, v2: true },
   };
 }
 
@@ -210,6 +211,7 @@ function loadProject(obj) {
   const base = newProject();
   P = { ...base, ...obj, floor: { ...base.floor, ...obj.floor }, env: { ...base.env, ...obj.env },
     rrm: { ...base.rrm, ...obj.rrm, tpc: { ...base.rrm.tpc, ...(obj.rrm?.tpc || {}) } }, heat: { ...base.heat, ...obj.heat } };
+  if (!obj.heat?.v2) Object.assign(P.heat, { opacity: 85, contours: false, v2: true });   // estilo de mapa nuevo
   P.walls = (P.walls || []).filter(w => RF.MATERIALS[w.mat]);
   P.aps = (P.aps || []).filter(a => RF.MODELS[a.model]);
   P.aps.forEach(a => { if (a.status !== 'up') a.status = 'up'; setModel(a, a.model); });
@@ -463,13 +465,15 @@ const Heat = {
 
   coarse: false,                                    // rejilla gruesa mientras se arrastra
 
+  /** Rejilla de cálculo: el plano más un margen exterior (la señal sale del edificio). */
   getGrid() {
-    const W = P.floor.w, H = P.floor.h, max = this.coarse ? 9000 : 42000;
+    const m = P.heat.outside ? clamp(Math.max(P.floor.w, P.floor.h) * 0.3, 4, 20) : 0;
+    const W = P.floor.w + 2 * m, H = P.floor.h + 2 * m, max = this.coarse ? 10000 : 48000;
     let res = this.coarse ? Math.max(P.env.gridRes * 2, 0.5) : P.env.gridRes;
     if (W * H / (res * res) > max) res = Math.sqrt(W * H / max);
     const cols = Math.max(1, Math.ceil(W / res)), rows = Math.max(1, Math.ceil(H / res));
-    const key = `${cols}x${rows}@${res.toFixed(4)}`;
-    return { cols, rows, res, key };
+    const key = `${cols}x${rows}@${res.toFixed(4)}~${m.toFixed(2)}`;
+    return { cols, rows, res, key, x0: -m, y0: -m };
   },
 
   invalidate() { this.geoVer++; },
@@ -519,9 +523,15 @@ const Heat = {
   evalPoint(rs, S, profile) {
     const { all, groups, ov } = S;
     let best = -Infinity, bi = -1, sec = -Infinity, n75 = 0;
+    const steer = P.rrm.bandSteering;
     for (const g of groups) {
-      let gb = -Infinity, gi = -1;
-      for (const i of g) if (rs[i] > gb) { gb = rs[i]; gi = i; }
+      // radio que usaría un cliente de ese AP (band steering hacia 5/6 GHz)
+      let gb = -Infinity, gi = -1, gs = -Infinity;
+      for (const i of g) {
+        const v = rs[i], b = all[i].b;
+        const sc = v + (steer ? (b === '6' && v >= -70 ? 12 : b === '5' && v >= -72 ? 10 : 0) : 0);
+        if (sc > gs) { gs = sc; gb = v; gi = i; }
+      }
       if (gb >= -75) n75++;
       if (gb > best) { sec = best; best = gb; bi = gi; } else if (gb > sec) sec = gb;
     }
@@ -549,24 +559,43 @@ const Heat = {
     return { best, bi, sec, n75, snr, sinr, cci, phy, thr, fails, s };
   },
 
-  compute({ metric, band, source, hidden, cutoff, profile }) {
+  /**
+   * Campos en bruto sobre la rejilla (sin recortar por umbral): la métrica,
+   * mejor y 2.ª señal, SNR, SINR y la señal de cada AP para dibujar fronteras.
+   */
+  compute({ metric, band, source, hidden, profile }) {
     const g = this.getGrid(), n = g.cols * g.rows;
     const S = this.setup(band, source, hidden, true);
     const R = S.all.length;
-    const val = new Float32Array(n).fill(NaN), best = new Float32Array(n).fill(NaN);
+    const nan = () => new Float32Array(n).fill(NaN);
+    const val = nan(), best = nan(), sec = nan(), snr = nan(), sinr = nan();
+    const apF = S.groups.map(gr => ({ ai: S.all[gr[0]].ai, ap: S.all[gr[0]].ap, idx: gr, f: new Float32Array(n).fill(-200) }));
     const rs = new Float64Array(R);
-    const st = { cells: n, c67: 0, c75: 0, snr: 0, thr: 0, pass: 0, served: 0 };
+    const st = { cells: 0, c67: 0, c75: 0, snr: 0, thr: 0, pass: 0, served: 0 };
     const chanIdx = new Map();
     for (let idx = 0; idx < n; idx++) {
       for (let i = 0; i < R; i++) rs[i] = S.all[i].txg - S.all[i].L[idx];
+      for (const a of apF) { let b = -200; for (const i of a.idx) if (rs[i] > b) b = rs[i]; a.f[idx] = b; }
+      const cx = g.x0 + (idx % g.cols + 0.5) * g.res, cy = g.y0 + (Math.floor(idx / g.cols) + 0.5) * g.res;
+      const inside = cx >= 0 && cy >= 0 && cx <= P.floor.w && cy <= P.floor.h;
+      if (inside) st.cells++;
       const e = this.evalPoint(rs, S, profile);
       if (!e) continue;
-      best[idx] = e.best;
+      best[idx] = e.best; sec[idx] = Number.isFinite(e.sec) ? e.sec : -200; snr[idx] = e.snr; sinr[idx] = e.sinr;
+      if (!inside) { val[idx] = this.metricValue(metric, e, chanIdx); continue; }
       st.served++;
       if (e.best >= -67) st.c67++;
       if (e.best >= -75) st.c75++;
       st.snr += e.snr; st.thr += e.thr;
       if (!e.fails.length) st.pass++;
+      val[idx] = this.metricValue(metric, e, chanIdx);
+    }
+    st.cells = Math.max(st.cells, 1);
+    st.snr /= Math.max(st.served, 1); st.thr /= Math.max(st.served, 1);
+    return { val, best, sec, snr, sinr, apF, grid: g, stats: st, chanIdx, radios: S.all };
+  },
+
+  metricValue(metric, e, chanIdx) {
       let v;
       switch (metric) {
         case 'rssi': v = e.best; break;
@@ -585,12 +614,7 @@ const Heat = {
         }
         case 'req': v = e.fails.length ? 0 : 1; break;
       }
-      if (metric !== 'req' && e.best < cutoff) continue;
-      if (metric === 'second' && !(e.sec >= cutoff)) continue;
-      val[idx] = v;
-    }
-    st.snr /= Math.max(st.served, 1); st.thr /= Math.max(st.served, 1);
-    return { val, best, grid: g, stats: st, chanIdx, radios: S.all };
+      return v;
   },
 
   probe(x, y, { band, source, hidden, profile }) {

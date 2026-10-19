@@ -19,14 +19,21 @@ const SNR_STOPS = [[0, '#7f1d1d'], [10, '#ef4444'], [18, '#f97316'], [25, '#eab3
 const RATE_STOPS = [[0, '#7f1d1d'], [25, '#ef4444'], [100, '#f97316'], [300, '#eab308'], [600, '#84cc16'], [1200, '#22c55e'], [2400, '#06b6d4']];
 const CH_COLORS = ['#38bdf8', '#f472b6', '#facc15', '#4ade80', '#a78bfa', '#fb923c', '#2dd4bf', '#f87171', '#a3e635', '#c084fc', '#60a5fa', '#fbbf24'];
 
+// Franjas de color (valor ≥ umbral): verdes con buena señal, luego amarillo, naranja y rojo.
+const BAND_COLORS = ['#0b8a46', '#1fae4b', '#62c92b', '#b5e02a', '#f2e530', '#ffb92e', '#ff7f1f', '#ee3b2b', '#b4161c'];
+const mkSteps = (th, unit) => th.map((t, i) => [t, BAND_COLORS[i], i === th.length - 1 ? `< ${th[i - 1]}` : `≥ ${t}`, unit]);
+const RSSI_STEPS = mkSteps([-45, -52, -60, -67, -72, -77, -82, -87, -Infinity], 'dBm');
+const SNR_STEPS = mkSteps([45, 38, 32, 25, 20, 15, 10, 5, -Infinity], 'dB');
+const RATE_STEPS = mkSteps([2000, 1400, 900, 600, 350, 150, 60, 20, -Infinity], 'Mbps');
+
 const METRICS = {
-  rssi:    { name: 'Señal (RSSI) del mejor AP', stops: RSSI_STOPS, ticks: [-90, -80, -70, -60, -50, -40], unit: 'dBm' },
-  second:  { name: 'Señal del 2.º mejor AP (roaming)', stops: RSSI_STOPS, ticks: [-90, -80, -70, -60, -50, -40], unit: 'dBm' },
-  snr:     { name: 'Relación señal/ruido (SNR)', stops: SNR_STOPS, ticks: [0, 10, 20, 30, 40, 50], unit: 'dB' },
-  sinr:    { name: 'SINR (con interferencia co-canal)', stops: SNR_STOPS, ticks: [0, 10, 20, 30, 40, 50], unit: 'dB' },
+  rssi:    { name: 'Señal (RSSI) del mejor AP', steps: RSSI_STEPS },
+  second:  { name: 'Señal del 2.º mejor AP (roaming)', steps: RSSI_STEPS },
+  snr:     { name: 'Relación señal/ruido (SNR)', steps: SNR_STEPS },
+  sinr:    { name: 'SINR (con interferencia co-canal)', steps: SNR_STEPS },
   cci:     { name: 'Interferencia co-canal (APs ≥ -82 dBm)', discrete: [[0, '#22c55e', '0'], [1, '#84cc16', '1'], [2, '#eab308', '2'], [3, '#f97316', '3'], [4, '#ef4444', '4+']] },
-  rate:    { name: 'Velocidad PHY (cliente 2x2)', stops: RATE_STOPS, ticks: [0, 300, 600, 1200, 2400], unit: 'Mbps' },
-  thr:     { name: 'Throughput estimado por cliente', stops: RATE_STOPS, ticks: [0, 300, 600, 1200, 2400], unit: 'Mbps' },
+  rate:    { name: 'Velocidad PHY (cliente 2x2)', steps: RATE_STEPS },
+  thr:     { name: 'Throughput estimado por cliente', steps: RATE_STEPS },
   apcount: { name: 'Nº de APs con señal ≥ -75 dBm', discrete: [[0, '#ef4444', '0'], [1, '#f97316', '1'], [2, '#eab308', '2'], [3, '#84cc16', '3'], [4, '#22c55e', '4+']] },
   zones:   { name: 'Zonas de servicio (AP que atiende)', cat: 'ap' },
   channel: { name: 'Canal del AP que atiende', cat: 'channel' },
@@ -55,7 +62,7 @@ const MapView = (() => {
   const vw = { scale: 20, ox: 40, oy: 40 };
   let tool = 'select', wallMat = 'drywall', apModelSel = 'AS-660E', cliTypeSel = 'phone';
   let sel = null, drag = null, draft = null, hover = null, measure = null;
-  let heat = null, heatDirty = true, contours = [];
+  let heat = null, heatDirty = true, contours = [], borders = [];
   const heatCv = document.createElement('canvas'), hctx = heatCv.getContext('2d');
   let img = null, imgSrc = null, blink = null, walk = null, walkAnim = null;
   const pointers = new Map();
@@ -82,7 +89,7 @@ const MapView = (() => {
 
   function fit() {
     if (!CW) return;
-    const pad = 36;
+    const pad = 36 + (P.heat.outside ? 30 : 0);
     vw.scale = Math.max(2, Math.min((CW - pad * 2) / P.floor.w, (CH - pad * 2) / P.floor.h));
     vw.ox = (CW - P.floor.w * vw.scale) / 2;
     vw.oy = (CH - P.floor.h * vw.scale) / 2;
@@ -97,46 +104,132 @@ const MapView = (() => {
   }
 
   /* --------------------------------------------------------------- calor */
-  function colorFor(m, v) {
-    if (m.discrete) { const d = m.discrete; const k = Math.min(Math.round(v), d.length - 1); return hex3(d[Math.max(0, k)][1]); }
-    if (m.cat === 'ap') return hex3(AP_COLORS[v % AP_COLORS.length]);
-    if (m.cat === 'channel') return hex3(CH_COLORS[v % CH_COLORS.length]);
-    return (m._fn ||= rampFn(m.stops))(v);
-  }
 
+  /**
+   * Pinta el mapa en una imagen de alta resolución: valores interpolados y
+   * cuantizados en franjas, rayado de solape (roaming) e interferencia co-canal.
+   */
   function buildHeat() {
     heatDirty = false;
-    if (!P.aps.length) { heat = null; contours = []; renderStats(); return; }
+    if (!P.aps.length) { heat = null; contours = []; borders = []; renderStats(); renderLegend(); return; }
     heat = Heat.compute(heatOpts());
-    const g = heat.grid, m = METRICS[P.heat.metric];
-    heatCv.width = g.cols; heatCv.height = g.rows;
-    const im = hctx.createImageData(g.cols, g.rows), d = im.data;
-    for (let i = 0; i < heat.val.length; i++) {
-      const v = heat.val[i];
-      if (Number.isNaN(v)) continue;
-      const c = colorFor(m, v);
-      d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = 255;
+    const g = heat.grid, m = METRICS[P.heat.metric], metric = P.heat.metric;
+    const K = clamp(Math.floor((Heat.coarse ? 480 : 1300) / Math.max(g.cols, g.rows)), 1, 8);
+    const W = g.cols * K, H = g.rows * K, cols = g.cols, rows = g.rows;
+    heatCv.width = W; heatCv.height = H;
+    const im = hctx.createImageData(W, H), d = im.data;
+    const cut = P.heat.cutoff;
+    const period = Math.max(5, Math.round(0.7 / (g.res / K)));      // rayado cada ~0,7 m
+    const thick = Math.max(1, Math.round(period * 0.16));
+    const masked = metric !== 'req';
+    const pal = m.steps ? m.steps.map(s => hex3(s[1])) : m.discrete ? m.discrete.map(s => hex3(s[1])) : null;
+    const apCols = AP_COLORS.map(hex3), chCols = CH_COLORS.map(hex3);
+    // pesos de interpolación bilineal precalculados por columna y fila
+    const axis = (n, len) => {
+      const i0 = new Int32Array(n), i1 = new Int32Array(n), t = new Float32Array(n);
+      for (let p = 0; p < n; p++) {
+        const v = clamp((p + 0.5) / K - 0.5, 0, len - 1), f = Math.floor(v);
+        i0[p] = f; i1[p] = Math.min(f + 1, len - 1); t[p] = v - f;
+      }
+      return [i0, i1, t];
+    };
+    const [X0, X1, TX] = axis(W, cols), [Y0, Y1, TY] = axis(H, rows);
+    let r0 = 0, r1 = 0, tx = 0, ty = 0, c0 = 0, c1 = 0;
+    const bil = f => {
+      const a = f[r0 + c0], b = f[r0 + c1], c = f[r1 + c0], e = f[r1 + c1];
+      if (a !== a || b !== b || c !== c || e !== e) return f[(ty < 0.5 ? r0 : r1) + (tx < 0.5 ? c0 : c1)];
+      return (a + (b - a) * tx) * (1 - ty) + (c + (e - c) * tx) * ty;
+    };
+    const valF = metric === 'rssi' ? heat.best : heat.val;
+    const multiAp = heat.apF.length > 1;
+    for (let py = 0; py < H; py++) {
+      r0 = Y0[py] * cols; r1 = Y1[py] * cols; ty = TY[py];
+      for (let px = 0; px < W; px++) {
+        c0 = X0[px]; c1 = X1[px]; tx = TX[px];
+        const best = bil(heat.best);
+        if (best !== best || (masked && best < cut)) continue;
+        let col;
+        if (m.steps) {
+          const v = valF === heat.best ? best : bil(valF);
+          const st = m.steps; let k = st.length - 1;
+          for (let i = 0; i < st.length; i++) if (v >= st[i][0]) { k = i; break; }
+          col = pal[k];
+        } else if (m.discrete) col = pal[clamp(Math.round(bil(heat.val)), 0, pal.length - 1)];
+        else if (m.cat === 'ap') {
+          let bi = 0, bv = -Infinity;
+          for (const a of heat.apF) { const v = bil(a.f); if (v > bv) { bv = v; bi = a.ai; } }
+          col = apCols[bi % apCols.length];
+        } else col = chCols[heat.val[(ty < 0.5 ? r0 : r1) + (tx < 0.5 ? c0 : c1)] % chCols.length];
+        if (metric === 'second' && !(bil(heat.sec) >= cut)) continue;
+        let R = col[0], G = col[1], B = col[2];
+        // donde se juntan las ondas: solo se evalúa en los píxeles de las rayas
+        if (P.heat.conflict && (px - py + 100000) % period < thick) {
+          const sinr = bil(heat.sinr);
+          if (sinr < 22 && bil(heat.snr) - sinr >= 10) { R = R * 0.3 + 178.5; G = G * 0.3 + 22.4; B = B * 0.3 + 44.8; }
+        } else if (P.heat.overlap && multiAp && (px + py) % period < thick) {
+          const s2 = bil(heat.sec);
+          if (s2 >= -70 && best - s2 < 4) { R = R * 0.5 + 127.5; G = G * 0.5 + 127.5; B = B * 0.5 + 127.5; }
+        }
+        const o = (py * W + px) * 4;
+        d[o] = R; d[o + 1] = G; d[o + 2] = B; d[o + 3] = 255;
+      }
     }
     hctx.putImageData(im, 0, 0);
-    contours = P.heat.contours && !Heat.coarse ? [[-67, contourSegs(heat.best, g, -67)], [-75, contourSegs(heat.best, g, -75)]] : [];
+    const fine = !Heat.coarse;
+    // líneas entre franjas (en vectorial: nítidas a cualquier zoom)
+    contours = [];
+    if (fine && m.steps) {
+      const f = metric === 'rssi' ? heat.best : heat.val;
+      for (const [t] of m.steps.slice(0, -1)) if (!masked || t >= cut) contours.push([t, contourSegs(f, g, t), 'band']);
+    }
+    if (fine && P.heat.contours) for (const t of [-67, -75]) contours.push([t, contourSegs(heat.best, g, t), 'iso']);
+    borders = fine && P.heat.borders ? cellBorders(heat, g) : [];
     renderStats();
     renderLegend();
   }
 
-  /** Isolíneas por marching squares sobre el mapa de mejor señal. */
+  /** Isolíneas por marching squares (coordenadas en metros). */
   function contourSegs(f, g, L) {
     const { cols, rows, res } = g, segs = [];
+    const ox = g.x0 || 0, oy = g.y0 || 0;
     const lerp = (a, b) => (L - a) / (b - a);
     for (let r = 0; r < rows - 1; r++) for (let c = 0; c < cols - 1; c++) {
       const a = f[r * cols + c], b = f[r * cols + c + 1], C = f[(r + 1) * cols + c + 1], d = f[(r + 1) * cols + c];
-      if (Number.isNaN(a) || Number.isNaN(b) || Number.isNaN(C) || Number.isNaN(d)) continue;
+      if (!(a === a && b === b && C === C && d === d)) continue;
       const k = (a >= L ? 8 : 0) | (b >= L ? 4 : 0) | (C >= L ? 2 : 0) | (d >= L ? 1 : 0);
       if (k === 0 || k === 15) continue;
-      const x0 = (c + 0.5) * res, y0 = (r + 0.5) * res, x1 = x0 + res, y1 = y0 + res;
+      const x0 = ox + (c + 0.5) * res, y0 = oy + (r + 0.5) * res, x1 = x0 + res, y1 = y0 + res;
       const T = [x0 + lerp(a, b) * res, y0], Rt = [x1, y0 + lerp(b, C) * res], B = [x0 + lerp(d, C) * res, y1], Lf = [x0, y0 + lerp(a, d) * res];
-      const S = { 1: [[Lf, B]], 2: [[B, Rt]], 3: [[Lf, Rt]], 4: [[T, Rt]], 5: [[T, Lf], [B, Rt]], 6: [[T, B]], 7: [[T, Lf]],
+      const Sg = { 1: [[Lf, B]], 2: [[B, Rt]], 3: [[Lf, Rt]], 4: [[T, Rt]], 5: [[T, Lf], [B, Rt]], 6: [[T, B]], 7: [[T, Lf]],
         8: [[T, Lf]], 9: [[T, B]], 10: [[T, Rt], [Lf, B]], 11: [[T, Rt]], 12: [[Lf, Rt]], 13: [[B, Rt]], 14: [[Lf, B]] }[k];
-      for (const s of S) segs.push(s);
+      for (const s of Sg) segs.push(s);
+    }
+    return segs;
+  }
+
+  /** Fronteras entre celdas: línea donde dos APs llegan con la misma señal. */
+  function cellBorders(h, g) {
+    const { cols, rows, res } = g, segs = [], F = h.apF, cut = P.heat.cutoff;
+    if (F.length < 2) return segs;
+    const top = new Int16Array(cols * rows);
+    for (let i = 0; i < top.length; i++) {
+      let bi = 0, bv = -Infinity;
+      for (let k = 0; k < F.length; k++) if (F[k].f[i] > bv) { bv = F[k].f[i]; bi = k; }
+      top[i] = h.best[i] >= Math.max(cut, -75) ? bi : -1;
+    }
+    const diff = new Float32Array(4);
+    for (let r = 0; r < rows - 1; r++) for (let c = 0; c < cols - 1; c++) {
+      const ids = [r * cols + c, r * cols + c + 1, (r + 1) * cols + c + 1, (r + 1) * cols + c];
+      const t = ids.map(i => top[i]);
+      if (t.some(x => x < 0) || (t[0] === t[1] && t[1] === t[2] && t[2] === t[3])) continue;
+      const mx = (g.x0 || 0) + (c + 1) * res, my = (g.y0 || 0) + (r + 1) * res;
+      if (mx < 0 || my < 0 || mx > P.floor.w || my > P.floor.h) continue;
+      const set = [...new Set(t)];
+      if (set.length !== 2) continue;
+      const A = F[set[0]].f, B = F[set[1]].f;
+      ids.forEach((i, k) => { diff[k] = A[i] - B[i]; });
+      const sq = { cols: 2, rows: 2, res, x0: (g.x0 || 0) + c * res, y0: (g.y0 || 0) + r * res };
+      for (const s of contourSegs([diff[0], diff[1], diff[3], diff[2]], sq, 0)) segs.push(s);
     }
     return segs;
   }
@@ -153,11 +246,9 @@ const MapView = (() => {
   function renderLegend() {
     const m = METRICS[P.heat.metric], el = $('#legend');
     let h = `<div class="t">${esc(m.name)}${P.heat.band !== 'all' ? ' · ' + RF.BAND_LABEL[P.heat.band] : ''}${view.source !== 'all' ? ' · ' + esc(P.aps.find(a => a.id === view.source)?.name) : ''}</div>`;
-    if (m.stops) {
-      const lo = m.ticks[0], hi = m.ticks[m.ticks.length - 1];
-      const fn = m._fn ||= rampFn(m.stops);
-      const g = Array.from({ length: 12 }, (_, i) => { const c = fn(lo + (hi - lo) * i / 11); return `rgb(${c.map(Math.round).join(',')})`; });
-      h += `<div class="ramp" style="background:linear-gradient(90deg,${g.join(',')})"></div><div class="ticks">${m.ticks.map(t => `<span>${t}</span>`).join('')}</div><div class="ticks"><span></span><span>${m.unit}</span></div>`;
+    if (m.steps) {
+      const st = P.heat.metric === 'rssi' || P.heat.metric === 'second' ? m.steps.filter((s, i) => i === 0 || m.steps[i - 1][0] > P.heat.cutoff) : m.steps;
+      h += `<div class="steps">${st.map(([, c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('')}</div><div class="ticks"><span>Buena señal</span><span>${m.steps[0][3]}</span></div>`;
     } else if (m.discrete) {
       h += `<div class="cats">${m.discrete.map(([, c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('')}</div>`;
     } else if (m.cat === 'ap') {
@@ -166,6 +257,12 @@ const MapView = (() => {
       const items = [...heat.chanIdx.entries()].map(([k, i]) => { const [b, ch, w] = k.split('|'); return `<span><i style="background:${CH_COLORS[i % CH_COLORS.length]}"></i>${RF.BAND_LABEL[b]} ${ch}/${w}</span>`; });
       h += `<div class="cats">${items.join('')}</div>`;
     }
+    const ex = [];
+    if (P.heat.borders) ex.push('<span><i class="ln"></i>Frontera entre APs</span>');
+    if (P.heat.overlap) ex.push('<span><i class="hatch w"></i>Solape (roaming)</span>');
+    if (P.heat.conflict) ex.push('<span><i class="hatch r"></i>Interferencia co-canal</span>');
+    ex.push('<span><i style="background:var(--nosig)"></i>Sin señal</span>');
+    h += `<div class="cats extra">${ex.join('')}</div>`;
     el.innerHTML = h;
   }
 
@@ -177,26 +274,38 @@ const MapView = (() => {
     if (heatDirty) buildHeat();
     const S = (x, y) => [V.ox + x * V.scale, V.oy + y * V.scale];
     c.setTransform(scaleDpr, 0, 0, scaleDpr, 0, 0);
-    c.fillStyle = '#070c18'; c.fillRect(0, 0, w, h);
+    // fondo azul = sin señal
+    c.fillStyle = '#0a1a3a'; c.fillRect(0, 0, w, h);
     const [fx, fy] = S(0, 0), fw = P.floor.w * V.scale, fh = P.floor.h * V.scale;
-    c.fillStyle = '#0e1628'; c.fillRect(fx, fy, fw, fh);
-    if (img && img.complete && img.naturalWidth) {
-      c.globalAlpha = P.floor.imgOpacity; c.drawImage(img, fx, fy, fw, fh); c.globalAlpha = 1;
-    }
+    if (heat) { const g = heat.grid, [hx, hy] = S(g.x0, g.y0); c.fillStyle = '#0f2a5c'; c.fillRect(hx, hy, g.cols * g.res * V.scale, g.rows * g.res * V.scale); }
+    c.fillStyle = '#163a7a'; c.fillRect(fx, fy, fw, fh);
     if (P.floor.showGrid) drawGrid(c, V, fx, fy, fw, fh);
+    const hasImg = img && img.complete && img.naturalWidth;
     if (heat) {
+      const g = heat.grid, [hx, hy] = S(g.x0, g.y0), hw = g.cols * g.res * V.scale, hh = g.rows * g.res * V.scale;
       c.save(); c.globalAlpha = P.heat.opacity / 100; c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
-      const g = heat.grid;
-      c.drawImage(heatCv, fx, fy, g.cols * g.res * V.scale, g.rows * g.res * V.scale);
+      c.drawImage(heatCv, hx, hy, hw, hh);
       c.restore();
-      for (const [lvl, segs] of contours) {
+    }
+    // el plano se multiplica sobre el mapa: sus líneas se ven a través del color
+    if (hasImg) {
+      c.save(); c.globalAlpha = P.floor.imgOpacity; c.globalCompositeOperation = 'multiply'; c.drawImage(img, fx, fy, fw, fh); c.restore();
+    }
+    if (heat) {
+      const stroke = (segs, style, lw, dash) => {
+        if (!segs.length) return;
         c.beginPath();
         for (const [a, b] of segs) { const p = S(a[0], a[1]), q = S(b[0], b[1]); c.moveTo(p[0], p[1]); c.lineTo(q[0], q[1]); }
-        c.strokeStyle = lvl === -67 ? 'rgba(255,255,255,.85)' : 'rgba(255,255,255,.5)';
-        c.setLineDash(lvl === -67 ? [] : [5, 4]); c.lineWidth = 1.3; c.stroke(); c.setLineDash([]);
+        c.strokeStyle = style; c.lineWidth = lw; c.setLineDash(dash || []); c.lineCap = 'round'; c.stroke(); c.setLineDash([]);
+      };
+      for (const [lvl, segs, kind] of contours) {
+        if (kind === 'band') stroke(segs, 'rgba(10,26,58,.32)', 1);
+        else stroke(segs, lvl === -67 ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.6)', 1.4, lvl === -67 ? [] : [5, 4]);
       }
+      stroke(borders, 'rgba(10,26,58,.55)', 3.2);
+      stroke(borders, 'rgba(255,255,255,.95)', 1.5, [7, 4]);
     }
-    c.strokeStyle = '#2b3a5c'; c.lineWidth = 1; c.strokeRect(fx + .5, fy + .5, fw, fh);
+    c.strokeStyle = 'rgba(147,197,253,.55)'; c.lineWidth = 1; c.strokeRect(fx + .5, fy + .5, fw, fh);
     // muros
     const lwF = clamp(V.scale / 22, 0.7, 2.2);
     P.walls.forEach((wl, i) => {
@@ -204,7 +313,8 @@ const MapView = (() => {
       c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]);
       const isSel = sel?.kind === 'wall' && sel.i === i;
       if (isSel) { c.strokeStyle = 'rgba(34,211,238,.45)'; c.lineWidth = m.w * lwF + 7; c.stroke(); }
-      c.strokeStyle = m.color; c.lineWidth = m.w * lwF; c.lineCap = 'round'; c.stroke();
+      c.strokeStyle = 'rgba(6,16,38,.85)'; c.lineWidth = m.w * lwF + 2.2; c.lineCap = 'round'; c.stroke();
+      c.strokeStyle = m.color; c.lineWidth = m.w * lwF; c.stroke();
       if (isSel) for (const p of [a, b]) { c.beginPath(); c.arc(p[0], p[1], 5, 0, 7); c.fillStyle = '#22d3ee'; c.fill(); }
     });
     // enlaces de clientes
@@ -239,7 +349,7 @@ const MapView = (() => {
     c.save(); c.beginPath(); c.rect(fx, fy, fw, fh); c.clip();
     for (let m = 0; m <= Math.max(P.floor.w, P.floor.h); m += step) {
       const major = m % (step * 5) === 0;
-      c.strokeStyle = major ? 'rgba(148,163,184,.13)' : 'rgba(148,163,184,.06)';
+      c.strokeStyle = major ? 'rgba(147,197,253,.18)' : 'rgba(147,197,253,.08)';
       c.lineWidth = 1;
       if (m <= P.floor.w) { const x = Math.round(fx + m * V.scale) + .5; c.beginPath(); c.moveTo(x, fy); c.lineTo(x, fy + fh); c.stroke(); }
       if (m <= P.floor.h) { const y = Math.round(fy + m * V.scale) + .5; c.beginPath(); c.moveTo(fx, y); c.lineTo(fx + fw, y); c.stroke(); }
@@ -749,9 +859,12 @@ const MapView = (() => {
     $('#hmMetric').onchange = e => { P.heat.metric = e.target.value; heatChanged(); };
     $('#hmProfile').onchange = e => { P.heat.profile = e.target.value; heatChanged(); };
     $('#hmSource').onchange = e => { view.source = e.target.value; heatChanged(); };
-    $('#hmCut').oninput = e => { P.heat.cutoff = +e.target.value; heatChanged(); };
+    $('#hmCut').oninput = e => { P.heat.cutoff = +e.target.value; $('#cutOut').textContent = `${P.heat.cutoff} dBm`; Heat.coarse = true; heatDirty = true; requestDraw(); };
+    $('#hmCut').onchange = () => { Heat.coarse = false; heatChanged(); };
     $('#hmOpacity').oninput = e => { P.heat.opacity = +e.target.value; $('#opOut').textContent = `${P.heat.opacity} %`; save(); draw(); };
     $('#hmContours').onchange = e => { P.heat.contours = e.target.checked; heatChanged(); };
+    for (const [id, k] of [['#hmOutside', 'outside'], ['#hmBorders', 'borders'], ['#hmOverlap', 'overlap'], ['#hmConflict', 'conflict']])
+      $(id).onchange = e => { P.heat[k] = e.target.checked; heatChanged(); };
     $('#hmLinks').onchange = e => { P.heat.links = e.target.checked; save(); draw(); };
     $('#allOn').onclick = () => { view.hidden.clear(); view.source = 'all'; heatChanged(); };
     $('#zIn').onclick = () => zoomAt(1.25); $('#zOut').onclick = () => zoomAt(0.8); $('#zFit').onclick = fit;
@@ -817,6 +930,8 @@ const MapView = (() => {
     $('#hmCut').value = P.heat.cutoff; $('#cutOut').textContent = `${P.heat.cutoff} dBm`;
     $('#hmOpacity').value = P.heat.opacity; $('#opOut').textContent = `${P.heat.opacity} %`;
     $('#hmContours').checked = P.heat.contours; $('#hmLinks').checked = P.heat.links;
+    $('#hmOutside').checked = P.heat.outside; $('#hmBorders').checked = P.heat.borders;
+    $('#hmOverlap').checked = P.heat.overlap; $('#hmConflict').checked = P.heat.conflict;
     // lista de APs
     const counts = {};
     P.clients.forEach(c => { if (c.link) counts[c.link.ap] = (counts[c.link.ap] || 0) + 1; });
@@ -917,7 +1032,8 @@ const MapView = (() => {
 
   /* ---------------------------------------------------------- exportar */
   function exportPng() {
-    const k = clamp(2400 / Math.max(P.floor.w, P.floor.h), 10, 80), pad = 30;
+    const mg = heat ? -heat.grid.x0 : 0;
+    const k = clamp(2400 / Math.max(P.floor.w + 2 * mg, P.floor.h + 2 * mg), 10, 80), pad = 30 + mg * k;
     const w = P.floor.w * k + pad * 2, h = P.floor.h * k + pad * 2 + 40;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const g = c.getContext('2d');
@@ -950,6 +1066,9 @@ const MapView = (() => {
     locate(id) { blink = { id, until: Date.now() + 4000 }; draw(); },
     refit() { fitted = false; },
     invalidateHeat() { heatDirty = true; },
+    /** Vista previa rápida mientras se arrastra un deslizador; full() al soltar. */
+    preview() { Heat.coarse = true; heatDirty = true; requestDraw(); },
+    full() { if (Heat.coarse) { Heat.coarse = false; heatDirty = true; requestDraw(); } },
     redraw: draw,
     renderSel,
     get selection() { return sel; },

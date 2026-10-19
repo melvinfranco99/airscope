@@ -109,7 +109,7 @@ const ApEditor = {
       inp.addEventListener(inp.type === 'range' ? 'input' : 'change', () => {
         if (k === 'name') { const v = inp.value.trim() || ap.name; logEvent('info', ap.name, `Renombrado a ${v}`); ap.name = v; save(); UI.refresh({ keepEditor: el }); rerender(); return; }
         if (k === 'model') { setModel(ap, inp.value); logEvent('info', ap.name, `Modelo cambiado a ${inp.value}`); commit(true, 'modelo de AP'); return; }
-        if (k === 'azimuth') { ap.azimuth = +inp.value; inp.previousElementSibling.querySelector('output').textContent = `${ap.azimuth}°`; MapView.invalidateHeat(); MapView.redraw(); clearTimeout(this._az); this._az = setTimeout(() => commit(true, 'orientación'), 250); return; }
+        if (k === 'azimuth') { ap.azimuth = +inp.value; inp.previousElementSibling.querySelector('output').textContent = `${ap.azimuth}°`; MapView.preview(); clearTimeout(this._az); this._az = setTimeout(() => { MapView.full(); commit(true, 'orientación'); }, 300); return; }
         const v = parseFloat(inp.value);
         if (!Number.isFinite(v)) return;
         if (k === 'x') ap.x = clamp(v, 0, P.floor.w);
@@ -145,9 +145,10 @@ const ApEditor = {
       tx.oninput = () => {
         r.tx = +tx.value; r.txMode = 'manual';
         tx.nextElementSibling.textContent = `${r.tx} dBm`;
-        MapView.invalidateHeat(); MapView.redraw();
+        MapView.preview();
       };
-      tx.onchange = () => { logEvent('info', ap.name, `${RF.BAND_LABEL[b]}: potencia ${r.tx} dBm (${fmw(r.tx)}, manual)`); commit(false); };
+      tx.onchange = () => {
+        Heat.coarse = false; logEvent('info', ap.name, `${RF.BAND_LABEL[b]}: potencia ${r.tx} dBm (${fmw(r.tx)}, manual)`); commit(false); };
       box.querySelectorAll('[data-w]').forEach(btn => btn.onclick = () => {
         const w = +btn.dataset.w; if (w === r.width) return;
         r.width = w;

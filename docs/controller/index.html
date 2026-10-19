@@ -73,6 +73,10 @@
           <div class="field" id="profField"><label class="f">Perfil de requisitos</label><select id="hmProfile"></select></div>
           <div class="field"><label class="f">Señal mínima mostrada <output id="cutOut" class="mono"></output></label><input type="range" id="hmCut" min="-100" max="-60" step="1"></div>
           <div class="field"><label class="f">Opacidad <output id="opOut" class="mono"></output></label><input type="range" id="hmOpacity" min="0" max="100" step="1"></div>
+          <label class="chk"><input type="checkbox" id="hmOutside"> Señal fuera del edificio</label>
+          <label class="chk"><input type="checkbox" id="hmBorders"> Fronteras entre APs</label>
+          <label class="chk"><input type="checkbox" id="hmOverlap"> Zonas de solape (roaming)</label>
+          <label class="chk"><input type="checkbox" id="hmConflict"> Interferencia co-canal</label>
           <label class="chk"><input type="checkbox" id="hmContours"> Isolíneas (-67 / -75 dBm)</label>
           <label class="chk"><input type="checkbox" id="hmLinks"> Mostrar enlaces de clientes</label>
           <div class="note" id="hmStats"></div>
